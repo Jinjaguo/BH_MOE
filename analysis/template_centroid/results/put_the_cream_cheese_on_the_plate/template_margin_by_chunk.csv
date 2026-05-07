@@ -4,6 +4,11 @@ action_head_input,chunk_aligned,intervention_recovered_success,1,-0.001216373609
 action_head_input,chunk_aligned,intervention_recovered_success,2,0.012147333001726657,0.0,0.0,13
 action_head_input,chunk_aligned,intervention_recovered_success,3,0.01729654531815759,0.014935153222287518,0.004142266211528375,13
 action_head_input,chunk_aligned,intervention_recovered_success,4,0.01910803777698345,0.01880874240384748,0.005216606551081993,13
+action_head_input,chunk_aligned,intervention_unrecovered_failure,0,-0.0004745485373024597,0.012841695397466395,0.004853704633448404,7
+action_head_input,chunk_aligned,intervention_unrecovered_failure,1,0.003860482019616212,0.007327592102217973,0.0027695694873413916,7
+action_head_input,chunk_aligned,intervention_unrecovered_failure,2,0.012147333001726657,0.0,0.0,7
+action_head_input,chunk_aligned,intervention_unrecovered_failure,3,0.0017319762832915173,0.016387699038513254,0.006193968030925481,7
+action_head_input,chunk_aligned,intervention_unrecovered_failure,4,0.0109142007039489,0.015470805890974212,0.005847414995610116,7
 action_head_input,chunk_aligned,natural_failure,0,-0.010506667307851143,0.009956087592653607,0.0017331323906187466,33
 action_head_input,chunk_aligned,natural_failure,1,-0.007516429974985627,0.00904092846359838,0.0015738236346063547,33
 action_head_input,chunk_aligned,natural_failure,2,-0.010753275399750307,0.009120268879612118,0.0015876350282485762,33
@@ -19,6 +24,11 @@ chunk_vector_mean,chunk_aligned,intervention_recovered_success,1,-0.001216373401
 chunk_vector_mean,chunk_aligned,intervention_recovered_success,2,0.012147333653809378,0.0,0.0,13
 chunk_vector_mean,chunk_aligned,intervention_recovered_success,3,0.0172965453176265,0.014935153443795092,0.004142266272963522,13
 chunk_vector_mean,chunk_aligned,intervention_recovered_success,4,0.019108037787048213,0.018808742347127344,0.005216606535350657,13
+chunk_vector_mean,chunk_aligned,intervention_unrecovered_failure,0,-0.0004745483529767304,0.01284169509178974,0.0048537045179134885,7
+chunk_vector_mean,chunk_aligned,intervention_unrecovered_failure,1,0.0038604822686595214,0.007327592708621559,0.0027695697165404033,7
+chunk_vector_mean,chunk_aligned,intervention_unrecovered_failure,2,0.012147333653809378,0.0,0.0,7
+chunk_vector_mean,chunk_aligned,intervention_unrecovered_failure,3,0.0017319760020506455,0.016387699600636234,0.0061939682433879975,7
+chunk_vector_mean,chunk_aligned,intervention_unrecovered_failure,4,0.010914201088464224,0.015470805377307724,0.0058474148014624324,7
 chunk_vector_mean,chunk_aligned,natural_failure,0,-0.010506667139596384,0.009956087685206257,0.001733132406730095,33
 chunk_vector_mean,chunk_aligned,natural_failure,1,-0.007516429868391039,0.00904092819094035,0.001573823587142684,33
 chunk_vector_mean,chunk_aligned,natural_failure,2,-0.010753275342274186,0.009120268981938509,0.0015876350460613143,33

@@ -9,13 +9,16 @@ intervals for three groups:
 1. natural success
 2. natural failure
 3. intervention recovered success
+4. intervention unrecovered failure
 
 The reported metrics include:
 1. Early Mean Margin over chunks 0..4.
 2. Post Intervention Mean Margin over chunks 2..4.
 3. Nearest Success Template Ratio over early, pre-patch, and post-patch windows.
-4. Template Switch Count over full trajectories.
-5. Late Success Alignment over the final 20% of each rollout.
+4. Template Switch Count and length-normalized Switch Rate over full trajectories.
+5. Template Entropy over early and full-rollout windows.
+6. Margin Stability summaries: mean, variance, mean absolute margin, minimum margin,
+   final margin, and late final-20% alignment.
 
 Arguments
 ---------
@@ -51,6 +54,9 @@ Key files:
   paper_metrics_rollout_level.csv
   paper_metrics_summary.csv
   paper_metrics_summary.json
+  template_switch_rate_boxplot.png
+  template_entropy_boxplot.png
+  margin_variance_boxplot.png
 """
 
 from __future__ import annotations
@@ -63,6 +69,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -70,12 +77,20 @@ GROUP_ORDER = [
     "natural_success",
     "natural_failure",
     "intervention_recovered_success",
+    "intervention_unrecovered_failure",
 ]
 
 GROUP_LABELS = {
     "natural_success": "natural success",
     "natural_failure": "natural failure",
     "intervention_recovered_success": "intervention recovered success",
+    "intervention_unrecovered_failure": "intervention unrecovered failure",
+}
+GROUP_COLORS = {
+    "natural_success": "#1f77b4",
+    "natural_failure": "#d62728",
+    "intervention_recovered_success": "#2ca02c",
+    "intervention_unrecovered_failure": "#9467bd",
 }
 
 
@@ -171,6 +186,33 @@ def switch_count(rows: list[dict[str, str]]) -> int:
     return sum(left != right for left, right in zip(signs[:-1], signs[1:]))
 
 
+def switch_rate(rows: list[dict[str, str]]) -> float:
+    denominator = max(1, len(rows) - 1)
+    return float(switch_count(rows) / denominator)
+
+
+def template_entropy(rows: list[dict[str, str]]) -> float | None:
+    if not rows:
+        return None
+    success_ratio = float(
+        np.mean([float(row["margin_success_minus_bowl"]) >= 0.0 for row in rows])
+    )
+    probs = [success_ratio, 1.0 - success_ratio]
+    entropy = 0.0
+    for prob in probs:
+        if prob > 0.0:
+            entropy -= prob * math.log2(prob)
+    return float(entropy)
+
+
+def row_window(rows: list[dict[str, str]], start: int, end: int) -> list[dict[str, str]]:
+    return [row for row in rows if start <= int(row["chunk_id"]) <= end]
+
+
+def margin_values(rows: list[dict[str, str]]) -> np.ndarray:
+    return np.asarray([float(row["margin_success_minus_bowl"]) for row in rows], dtype=np.float64)
+
+
 def build_rollout_metrics(
     full_rows: list[dict[str, str]],
     *,
@@ -187,6 +229,9 @@ def build_rollout_metrics(
         pre_ratio = nearest_success_ratio(rows, 0, intervention_chunk - 1)
         post_ratio = nearest_success_ratio(rows, intervention_chunk, post_end)
         early_ratio = nearest_success_ratio(rows, 0, 4)
+        margins = margin_values(rows)
+        early_rows = row_window(rows, 0, 4)
+        switches = switch_count(rows)
         rollout_rows.append(
             {
                 "latent_key": latent_key,
@@ -200,7 +245,15 @@ def build_rollout_metrics(
                 "nearest_success_ratio_chunk_0_4": early_ratio,
                 "nearest_success_ratio_pre_patch_chunk_0_1": pre_ratio,
                 "nearest_success_ratio_post_patch_chunk_2_4": post_ratio,
-                "template_switch_count": switch_count(rows),
+                "template_switch_count": switches,
+                "template_switch_rate": float(switches / max(1, len(rows) - 1)),
+                "template_entropy_chunk_0_4": template_entropy(early_rows),
+                "template_entropy_full_rollout": template_entropy(rows),
+                "mean_margin_full_rollout": float(margins.mean()) if margins.size else None,
+                "margin_variance_full_rollout": float(margins.var(ddof=1)) if margins.size > 1 else 0.0,
+                "abs_margin_mean_full_rollout": float(np.abs(margins).mean()) if margins.size else None,
+                "min_margin_full_rollout": float(margins.min()) if margins.size else None,
+                "final_margin": float(margins[-1]) if margins.size else None,
                 "late_success_alignment_final_20pct": late_mean(rows, late_fraction),
             }
         )
@@ -220,6 +273,14 @@ def summarize_rollout_metrics(
         "nearest_success_ratio_pre_patch_chunk_0_1",
         "nearest_success_ratio_post_patch_chunk_2_4",
         "template_switch_count",
+        "template_switch_rate",
+        "template_entropy_chunk_0_4",
+        "template_entropy_full_rollout",
+        "mean_margin_full_rollout",
+        "margin_variance_full_rollout",
+        "abs_margin_mean_full_rollout",
+        "min_margin_full_rollout",
+        "final_margin",
         "late_success_alignment_final_20pct",
     ]
     summary_rows: list[dict[str, Any]] = []
@@ -270,6 +331,63 @@ def compact_json_summary(summary_rows: list[dict[str, Any]]) -> dict[str, Any]:
     return payload
 
 
+def plot_group_boxplot(
+    path: Path,
+    rollout_rows: list[dict[str, Any]],
+    *,
+    metric: str,
+    ylabel: str,
+    title: str,
+) -> None:
+    latent_keys = sorted({row["latent_key"] for row in rollout_rows})
+    fig, axes = plt.subplots(1, len(latent_keys), figsize=(5.3 * len(latent_keys), 4.4), sharey=True)
+    if len(latent_keys) == 1:
+        axes = [axes]
+    for axis, latent_key in zip(axes, latent_keys):
+        data = []
+        labels = []
+        colors = []
+        for group in GROUP_ORDER:
+            values = [
+                float(row[metric])
+                for row in rollout_rows
+                if row["latent_key"] == latent_key and row["group"] == group and row[metric] not in {"", None}
+            ]
+            data.append(values)
+            labels.append(GROUP_LABELS[group].replace(" ", "\n"))
+            colors.append(GROUP_COLORS[group])
+        box = axis.boxplot(data, tick_labels=labels, patch_artist=True, showfliers=False)
+        for patch, color in zip(box["boxes"], colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.18)
+            patch.set_edgecolor(color)
+        for median in box["medians"]:
+            median.set_color("#222222")
+            median.set_linewidth(1.6)
+        rng = np.random.default_rng(11)
+        for idx, (values, color) in enumerate(zip(data, colors), start=1):
+            if not values:
+                continue
+            jitter = rng.uniform(-0.08, 0.08, size=len(values))
+            axis.scatter(
+                np.full(len(values), idx) + jitter,
+                values,
+                s=24,
+                alpha=0.78,
+                color=color,
+                edgecolors="white",
+                linewidths=0.35,
+            )
+        axis.set_title(latent_key)
+        axis.grid(True, axis="y", alpha=0.25)
+        axis.tick_params(axis="x", labelsize=9)
+    axes[0].set_ylabel(ylabel)
+    fig.suptitle(title, y=1.02)
+    fig.tight_layout()
+    fig.savefig(path, dpi=220, bbox_inches="tight")
+    plt.close(fig)
+
+
 def main() -> None:
     args = parse_args()
     output_dir = args.output_dir or args.results_dir
@@ -290,6 +408,27 @@ def main() -> None:
 
     write_csv(output_dir / "paper_metrics_rollout_level.csv", rollout_rows)
     write_csv(output_dir / "paper_metrics_summary.csv", summary_rows)
+    plot_group_boxplot(
+        output_dir / "template_switch_rate_boxplot.png",
+        rollout_rows,
+        metric="template_switch_rate",
+        ylabel="switch count / (num chunks - 1)",
+        title="Template Switch Rate",
+    )
+    plot_group_boxplot(
+        output_dir / "template_entropy_boxplot.png",
+        rollout_rows,
+        metric="template_entropy_full_rollout",
+        ylabel="template entropy (bits)",
+        title="Full-Rollout Template Entropy",
+    )
+    plot_group_boxplot(
+        output_dir / "margin_variance_boxplot.png",
+        rollout_rows,
+        metric="margin_variance_full_rollout",
+        ylabel="variance of success-minus-bowl margin",
+        title="Margin Stability",
+    )
     json_payload = {
         "results_dir": args.results_dir.as_posix(),
         "intervention_chunk": args.intervention_chunk,

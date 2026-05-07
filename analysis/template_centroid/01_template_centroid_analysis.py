@@ -13,7 +13,8 @@ template before action decoding by producing:
 1. Early template margin curves over chunks 0..4.
 2. Nearest-template distributions for natural success and natural failure.
 3. Full-rollout template dynamics curves and heatmaps.
-4. Optional PCA scatter plots as supporting visualization.
+4. Adjacent-chunk cosine drift curves for latent trajectory smoothness.
+5. Optional PCA scatter plots as supporting visualization.
 
 Arguments
 ---------
@@ -35,7 +36,8 @@ Arguments
       Optional chunk-wise output root for recovered intervention rollouts.
   --intervention-summary:
       Optional soft-success summary CSV. Rows with `analysis_success=True` are
-      treated as intervention successful rollouts.
+      treated as intervention recovered successes, while rows with
+      `analysis_success=False` are treated as intervention unrecovered failures.
   --centroid-mode:
       `chunk_aligned` builds one success/bowl centroid pair per chunk id.
       `global` builds one success/bowl centroid pair across all early chunks.
@@ -59,7 +61,10 @@ Key files:
   nearest_template_distribution.png
   full_rollout_margin_curve.png
   normalized_full_rollout_margin_curve.png
+  normalized_cosine_drift_curve.png
   rollout_margin_heatmap.png
+  cosine_drift_by_transition.csv
+  normalized_cosine_drift_by_bin.csv
   rollout_dynamics_summary.csv
   pca_scatter.png
   template_margin_by_chunk.csv
@@ -91,16 +96,23 @@ DEFAULT_OUTPUT_DIR = Path(
     "analysis/template_centroid/results/put_the_cream_cheese_on_the_plate"
 )
 DEFAULT_FIELDS = ["action_head_input", "chunk_vector_mean"]
-GROUPS = ["natural_success", "natural_failure", "intervention_recovered_success"]
+GROUPS = [
+    "natural_success",
+    "natural_failure",
+    "intervention_recovered_success",
+    "intervention_unrecovered_failure",
+]
 GROUP_LABELS = {
     "natural_success": "natural success",
     "natural_failure": "natural failure",
     "intervention_recovered_success": "intervention success",
+    "intervention_unrecovered_failure": "intervention failure",
 }
 GROUP_COLORS = {
     "natural_success": "#1f77b4",
     "natural_failure": "#d62728",
     "intervention_recovered_success": "#2ca02c",
+    "intervention_unrecovered_failure": "#9467bd",
 }
 
 
@@ -218,7 +230,7 @@ def load_full_manifest_rows(path: Path, failure_mode: str) -> list[dict[str, Any
     return selected
 
 
-def intervention_success_rows(
+def intervention_rollout_rows(
     task_root: Path,
     summary_path: Path,
     *,
@@ -229,12 +241,15 @@ def intervention_success_rows(
     rows: list[dict[str, Any]] = []
     with summary_path.open("r", encoding="utf-8-sig", newline="") as handle:
         summary_rows = list(csv.DictReader(handle))
-    success_trials = [
-        int(row["trial_id"])
+    trial_groups = {
+        int(row["trial_id"]): (
+            "intervention_recovered_success"
+            if parse_csv_bool(row.get("analysis_success"))
+            else "intervention_unrecovered_failure"
+        )
         for row in summary_rows
-        if parse_csv_bool(row.get("analysis_success"))
-    ]
-    for trial_id in success_trials:
+    }
+    for trial_id, group in trial_groups.items():
         trial_dir = task_root / f"trial_{trial_id}"
         if not trial_dir.exists():
             continue
@@ -249,11 +264,11 @@ def intervention_success_rows(
                     "trial_id": str(trial_id),
                     "chunk_id": str(chunk_id),
                     "latent_pt_path": chunk_path.as_posix(),
-                    "success": "1",
-                    "dominant_failure_mode": "intervention_recovered_success",
+                    "success": "1" if group == "intervention_recovered_success" else "0",
+                    "dominant_failure_mode": group,
                     "valid_for_probe": "1",
                     "is_early_chunk": "1" if chunk_id <= 4 else "0",
-                    "analysis_group": "intervention_recovered_success",
+                    "analysis_group": group,
                 }
             )
     return rows
@@ -492,9 +507,7 @@ def plot_nearest_distribution(path: Path, rows: list[dict[str, Any]], fields: li
                 )
         axis.set_title(field)
         axis.set_xticks(group_positions)
-        axis.set_xticklabels(
-            ["natural success\nrollouts", "natural failure\nrollouts", "intervention\nsuccess rollouts"]
-        )
+        axis.set_xticklabels([GROUP_LABELS[group].replace(" ", "\n") for group in GROUPS])
         axis.set_ylim(0.0, 1.12)
         axis.grid(True, axis="y", alpha=0.25)
         axis.set_ylabel("proportion nearest to template")
@@ -636,6 +649,73 @@ def normalized_curve_rows(
     return rows
 
 
+def compute_cosine_drift_rows(
+    full_samples: list[dict[str, Any]],
+    field: str,
+    num_bins: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    by_rollout: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+    for sample in full_samples:
+        by_rollout[(sample["rollout_id"], int(sample["trial_id"]))].append(sample)
+
+    drift_rows: list[dict[str, Any]] = []
+    normalized_values: dict[tuple[str, int], list[float]] = defaultdict(list)
+    target_x = np.linspace(0.0, 1.0, num_bins)
+    for (_, trial_id), samples in sorted(by_rollout.items(), key=lambda item: item[0][1]):
+        samples = sorted(samples, key=lambda sample: int(sample["chunk_id"]))
+        if len(samples) < 2:
+            continue
+        drifts: list[float] = []
+        transition_times: list[float] = []
+        denominator = max(1, len(samples) - 2)
+        for transition_id, (left, right) in enumerate(zip(samples[:-1], samples[1:])):
+            drift = 1.0 - cosine(left["vector"], right["vector"])
+            drifts.append(float(drift))
+            transition_time = float(transition_id / denominator)
+            transition_times.append(transition_time)
+            drift_rows.append(
+                {
+                    "latent_key": field,
+                    "rollout_id": left["rollout_id"],
+                    "trial_id": trial_id,
+                    "group": left["group"],
+                    "dominant_failure_mode": left["dominant_failure_mode"],
+                    "transition_id": transition_id,
+                    "from_chunk_id": left["chunk_id"],
+                    "to_chunk_id": right["chunk_id"],
+                    "normalized_transition_time": transition_time,
+                    "cosine_drift": float(drift),
+                }
+            )
+        interpolated = np.interp(
+            target_x,
+            np.asarray(transition_times, dtype=np.float64),
+            np.asarray(drifts, dtype=np.float64),
+        )
+        group = samples[0]["group"]
+        for bin_id, value in enumerate(interpolated):
+            normalized_values[(group, bin_id)].append(float(value))
+
+    normalized_rows: list[dict[str, Any]] = []
+    for (group, bin_id), values in sorted(
+        normalized_values.items(), key=lambda item: (item[0][0], item[0][1])
+    ):
+        arr = np.asarray(values, dtype=np.float64)
+        normalized_rows.append(
+            {
+                "latent_key": field,
+                "group": group,
+                "time_bin": bin_id,
+                "normalized_time": float(target_x[bin_id]),
+                "mean_cosine_drift": float(arr.mean()),
+                "std_cosine_drift": float(arr.std(ddof=1)) if len(arr) > 1 else 0.0,
+                "sem_cosine_drift": float(arr.std(ddof=1) / np.sqrt(len(arr))) if len(arr) > 1 else 0.0,
+                "n": int(len(arr)),
+            }
+        )
+    return drift_rows, normalized_rows
+
+
 def plot_full_margin_curve(path: Path, curve_rows: list[dict[str, Any]], fields: list[str]) -> None:
     fig, axes = plt.subplots(len(fields), 1, figsize=(9.2, 3.8 * len(fields)), sharex=True)
     if len(fields) == 1:
@@ -685,6 +765,32 @@ def plot_normalized_margin_curve(path: Path, curve_rows: list[dict[str, Any]], f
         axis.legend(frameon=False, loc="best")
     axes[-1].set_xlabel("normalized rollout time")
     fig.suptitle("Normalized Full Rollout Template Margin Curve", y=1.01)
+    fig.tight_layout()
+    fig.savefig(path, dpi=220, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_normalized_cosine_drift_curve(path: Path, curve_rows: list[dict[str, Any]], fields: list[str]) -> None:
+    fig, axes = plt.subplots(len(fields), 1, figsize=(9.2, 3.8 * len(fields)), sharex=True)
+    if len(fields) == 1:
+        axes = [axes]
+    for axis, field in zip(axes, fields):
+        for group in GROUPS:
+            rows = [r for r in curve_rows if r["latent_key"] == field and r["group"] == group]
+            if not rows:
+                continue
+            rows = sorted(rows, key=lambda r: int(r["time_bin"]))
+            x = np.asarray([float(r["normalized_time"]) for r in rows], dtype=np.float64)
+            y = np.asarray([float(r["mean_cosine_drift"]) for r in rows], dtype=np.float64)
+            sem = np.asarray([float(r["sem_cosine_drift"]) for r in rows], dtype=np.float64)
+            axis.plot(x, y, linewidth=2.0, color=GROUP_COLORS[group], label=GROUP_LABELS[group])
+            axis.fill_between(x, y - sem, y + sem, color=GROUP_COLORS[group], alpha=0.15)
+        axis.set_title(field)
+        axis.set_ylabel("1 - cos(z_t, z_{t+1})")
+        axis.grid(True, alpha=0.25)
+        axis.legend(frameon=False, loc="best")
+    axes[-1].set_xlabel("normalized rollout transition time")
+    fig.suptitle("Normalized Cosine Drift Curve", y=1.01)
     fig.tight_layout()
     fig.savefig(path, dpi=220, bbox_inches="tight")
     plt.close(fig)
@@ -772,14 +878,14 @@ def main() -> None:
         old_centroid.unlink()
 
     manifest_rows = load_manifest_rows(args.chunk_manifest, args.failure_mode, args.max_early_chunk)
-    intervention_early_rows = intervention_success_rows(
+    intervention_early_rows = intervention_rollout_rows(
         args.intervention_task_root,
         args.intervention_summary,
         max_chunk=args.max_early_chunk,
     )
     early_eval_rows = manifest_rows + intervention_early_rows
     full_manifest_rows = load_full_manifest_rows(args.chunk_manifest, args.failure_mode)
-    intervention_full_rows = intervention_success_rows(
+    intervention_full_rows = intervention_rollout_rows(
         args.intervention_task_root,
         args.intervention_summary,
         max_chunk=None,
@@ -795,6 +901,8 @@ def main() -> None:
     all_dynamics_curve_rows: list[dict[str, Any]] = []
     all_normalized_curve_rows: list[dict[str, Any]] = []
     all_rollout_dynamics_rows: list[dict[str, Any]] = []
+    all_cosine_drift_rows: list[dict[str, Any]] = []
+    all_normalized_cosine_drift_rows: list[dict[str, Any]] = []
     samples_by_field: dict[str, list[dict[str, Any]]] = {}
     summary: dict[str, Any] = {
         "chunk_manifest": args.chunk_manifest.as_posix(),
@@ -835,6 +943,9 @@ def main() -> None:
         dynamics_rows, dynamics_curve_rows, rollout_dynamics_rows = compute_dynamics_rows(
             full_samples, centroid_pairs, field
         )
+        cosine_drift_rows, normalized_cosine_drift_rows = compute_cosine_drift_rows(
+            full_samples, field, args.normalized_bins
+        )
         full_curve_samples = load_field_vectors_with_cache(full_curve_rows_input, field, payload_cache)
         _, limited_dynamics_curve_rows, _ = compute_dynamics_rows(
             full_curve_samples, centroid_pairs, field
@@ -847,6 +958,8 @@ def main() -> None:
         all_dynamics_curve_rows.extend(limited_dynamics_curve_rows)
         all_rollout_dynamics_rows.extend(rollout_dynamics_rows)
         all_normalized_curve_rows.extend(norm_rows)
+        all_cosine_drift_rows.extend(cosine_drift_rows)
+        all_normalized_cosine_drift_rows.extend(normalized_cosine_drift_rows)
         rollout_group_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in rollout_dynamics_rows:
             rollout_group_rows[row["group"]].append(row)
@@ -857,10 +970,16 @@ def main() -> None:
             "num_intervention_recovered_samples": sum(
                 s["group"] == "intervention_recovered_success" for s in eval_early_samples
             ),
+            "num_intervention_unrecovered_samples": sum(
+                s["group"] == "intervention_unrecovered_failure" for s in eval_early_samples
+            ),
             "num_success_rollouts": len({s["trial_id"] for s in eval_early_samples if s["group"] == "natural_success"}),
             "num_failure_rollouts": len({s["trial_id"] for s in eval_early_samples if s["group"] == "natural_failure"}),
             "num_intervention_recovered_rollouts": len(
                 {s["trial_id"] for s in eval_early_samples if s["group"] == "intervention_recovered_success"}
+            ),
+            "num_intervention_unrecovered_rollouts": len(
+                {s["trial_id"] for s in eval_early_samples if s["group"] == "intervention_unrecovered_failure"}
             ),
             "nearest_distribution": distribution_rows,
             "dynamics_by_group": {
@@ -885,6 +1004,20 @@ def main() -> None:
                 }
                 for group, rows in rollout_group_rows.items()
             },
+            "mean_cosine_drift_by_group": {
+                group: float(
+                    np.mean(
+                        [
+                            row["cosine_drift"]
+                            for row in cosine_drift_rows
+                            if row["group"] == group
+                        ]
+                    )
+                )
+                if any(row["group"] == group for row in cosine_drift_rows)
+                else 0.0
+                for group in GROUPS
+            },
         }
 
     write_csv(args.output_dir / "sample_margins.csv", all_sample_rows)
@@ -894,6 +1027,11 @@ def main() -> None:
     write_csv(args.output_dir / "full_rollout_margin_by_chunk.csv", all_dynamics_curve_rows)
     write_csv(args.output_dir / "normalized_full_rollout_margin_by_bin.csv", all_normalized_curve_rows)
     write_csv(args.output_dir / "rollout_dynamics_summary.csv", all_rollout_dynamics_rows)
+    write_csv(args.output_dir / "cosine_drift_by_transition.csv", all_cosine_drift_rows)
+    write_csv(
+        args.output_dir / "normalized_cosine_drift_by_bin.csv",
+        all_normalized_cosine_drift_rows,
+    )
     plot_margin_curve(args.output_dir / "template_margin_curve.png", all_margin_rows, args.fields)
     plot_nearest_distribution(
         args.output_dir / "nearest_template_distribution.png", all_distribution_rows, args.fields
@@ -904,6 +1042,11 @@ def main() -> None:
     plot_normalized_margin_curve(
         args.output_dir / "normalized_full_rollout_margin_curve.png",
         all_normalized_curve_rows,
+        args.fields,
+    )
+    plot_normalized_cosine_drift_curve(
+        args.output_dir / "normalized_cosine_drift_curve.png",
+        all_normalized_cosine_drift_rows,
         args.fields,
     )
     plot_rollout_margin_heatmap(
