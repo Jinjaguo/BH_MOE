@@ -149,7 +149,7 @@ python /home/jinjaguo/BH_MOE/start_server_record.py --env pi0_libero
 This server saves hidden states to:
 
 ```text
-/home/jinjaguo/BH_MOE/OOD_exp/outputs/chunk_wise/<task_name>/trial_<trial_id>/chunk_<chunk_id>.pt
+/home/jinjaguo/BH_MOE/OOD_exp/dif_start_end_loc/outputs/chunk_wise/<task_name>/trial_<trial_id>/chunk_<chunk_id>.pt
 ```
 
 ### Terminal B: run OOD rollouts
@@ -197,20 +197,20 @@ python ood_libero_rollouts.py \
 Server-side chunk hidden states:
 
 ```text
-OOD_exp/outputs/chunk_wise/<task_name>/trial_<trial_id>/chunk_<chunk_id>.pt
+OOD_exp/dif_start_end_loc/outputs/chunk_wise/<task_name>/trial_<trial_id>/chunk_<chunk_id>.pt
 ```
 
 Rollout-side trial metadata:
 
 ```text
-OOD_exp/outputs/chunk_wise/<task_name>/trial_<trial_id>/rollouts_state_record.jsonl
-OOD_exp/outputs/chunk_wise/<task_name>/trial_<trial_id>/rollouts_finalize.jsonl
+OOD_exp/dif_start_end_loc/outputs/chunk_wise/<task_name>/trial_<trial_id>/rollouts_state_record.jsonl
+OOD_exp/dif_start_end_loc/outputs/chunk_wise/<task_name>/trial_<trial_id>/rollouts_finalize.jsonl
 ```
 
 Rollout videos:
 
 ```text
-OOD_exp/outputs/videos/<suite_name>/<relative_task_dir>/<task_name>/
+OOD_exp/dif_start_end_loc/outputs/videos/<suite_name>/<relative_task_dir>/<task_name>/
 ```
 
 ## Minimal run example

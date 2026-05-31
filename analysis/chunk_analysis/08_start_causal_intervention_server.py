@@ -13,8 +13,9 @@ Parameters
 ----------
 --env: default OpenPI environment/policy preset to serve.
 --port: websocket port.
---trace_root: directory containing existing success traces and receiving new
-              intervention traces.
+--source_trace_root: directory containing existing success traces. Defaults to
+                     --trace_root for backward compatibility.
+--trace_root: directory receiving new intervention traces.
 --task_name: task folder name under trace_root.
 --intervention_chunk: chunk index to intervene on, e.g. 2.
 --state: intervention target. Supported values are
@@ -36,13 +37,14 @@ start_server_record.py to load an explicit checkpoint.
 Usage
 -----
 python analysis/chunk_analysis/08_start_causal_intervention_server.py \
-    --env pi05_libero \
-    --port 8001 \
-    --trace_root OOD_exp/outputs/chunk_wise \
-    --task_name put_the_cream_cheese_on_the_plate \
-    --intervention_chunk 2 \
-    --state action_head_input \
-    --reference_mode mean_success
+  --source_trace_root OOD_exp/dif_start_end_loc/outputs/chunk_wise \ 原来的chunk位置
+  --trace_root OOD_exp/dif_start_end_loc/outputs/intervetion/put_the_cream_cheese_on_the_plate \ 输出位置
+  --task_name put_the_cream_cheese_on_the_plate \ 任务名
+  --output_task_name chunk0 \ 修改这里
+  --intervention_chunk 0 \ 修改这里
+  --state action_head_input \
+  --port 8001
+运行的时候删掉所有的中文，反斜杠后面必须立刻换行(空格也得删掉)
 
 If no explicit policy:checkpoint is provided and the local PyTorch checkpoint
 exists at ~/.cache/openpi/pytorch_checkpoints/pi05_libero/model.safetensors,
@@ -124,7 +126,8 @@ class Args:
     env: EnvMode = EnvMode.pi05_libero
     default_prompt: str | None = None
     port: int = 8001
-    trace_root: pathlib.Path = REPO_ROOT / "OOD_exp" / "outputs" / "chunk_wise"
+    source_trace_root: pathlib.Path | None = None
+    trace_root: pathlib.Path = REPO_ROOT / "OOD_exp" / "dif_start_end_loc" / "outputs" / "chunk_wise"
     task_name: str = "put_the_cream_cheese_on_the_plate"
     intervention_chunk: int = 2
     state: str = "action_head_input"
@@ -522,10 +525,15 @@ def main(args: Args) -> None:
         raise ValueError(f"Unsupported --state {args.state}; choose from {sorted(SUPPORTED_STATES)}")
 
     trace_root = args.trace_root.expanduser().resolve()
+    source_trace_root = (
+        args.source_trace_root.expanduser().resolve()
+        if args.source_trace_root is not None
+        else trace_root
+    )
     source_task_name = sanitize_task_name(args.task_name)
     output_task_name = sanitize_task_name(args.output_task_name or f"{source_task_name}{args.output_task_suffix}")
     reference, reference_source = load_reference_tensor(
-        trace_root=trace_root,
+        trace_root=source_trace_root,
         task_name=source_task_name,
         chunk_id=args.intervention_chunk,
         state=args.state,
@@ -555,6 +563,7 @@ def main(args: Args) -> None:
     local_ip = socket.gethostbyname(hostname)
     logging.info("Creating causal intervention server (host: %s, ip: %s)", hostname, local_ip)
     logging.info("Intervention: task=%s chunk=%s state=%s ref=%s", source_task_name, args.intervention_chunk, args.state, reference_source)
+    logging.info("Loading intervention references from: %s/%s/", source_trace_root, source_task_name)
     logging.info("Saving intervention traces under: %s/%s/", trace_root, output_task_name)
 
     server = websocket_policy_server.WebsocketPolicyServer(

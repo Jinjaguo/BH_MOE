@@ -22,7 +22,7 @@ Arguments
   `ood_type`:
     Benchmark suite or OOD category associated with the rollout.
   `chunk_root`:
-    Root directory, usually `OOD_exp/outputs/chunk_wise`.
+    Root directory, usually `OOD_exp/dif_start_end_loc/outputs/chunk_wise`.
 
 Examples
 --------
@@ -32,7 +32,7 @@ logger = TrialLogger(
     task_name="put_the_bowl_on_the_rack",
     trial_id=3,
     ood_type="libero_goal",
-    chunk_root="OOD_exp/outputs/chunk_wise",
+    chunk_root="OOD_exp/dif_start_end_loc/outputs/chunk_wise",
 )
 
 req = logger.build_policy_payload(base_payload=req)
@@ -44,7 +44,7 @@ logger.finalize(success=True)
 Outputs
 -------
 Per-trial files are written to:
-`OOD_exp/outputs/chunk_wise/<task_name>/trial_<trial_id>/`
+`OOD_exp/dif_start_end_loc/outputs/chunk_wise/<task_name>/trial_<trial_id>/`
 
 The helper appends one JSON object per trial to:
 1. `rollouts_state_record.jsonl`

@@ -34,7 +34,7 @@ Outputs
 -------
 This helper returns a JSON-serializable dictionary and does not save files by
 itself. The result is intended to be written under:
-`OOD_exp/outputs/chunk_wise/<task_name>/trial_<trial_id>/`
+`OOD_exp/dif_start_end_loc/outputs/chunk_wise/<task_name>/trial_<trial_id>/`
 """
 
 from __future__ import annotations

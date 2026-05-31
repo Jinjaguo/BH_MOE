@@ -48,7 +48,7 @@ python analysis/chunk_analysis/10_run_soft_success_rollouts.py \
 Outputs
 -------
 Videos are saved under:
-  OOD_exp/outputs/videos/soft_success/<task_name>/
+  OOD_exp/dif_start_end_loc/outputs/videos/soft_success/<task_name>/
 
 Analysis metadata is saved under:
   <chunk_root>/<task_name>/trial_<trial_id>/rollouts_finalize.jsonl
@@ -59,7 +59,7 @@ strict label is preserved as `strict_success` in `final_info` and in
 Soft-stop labels are saved under:
   <chunk_root>/<task_name>/trial_<trial_id>/rollouts_soft_success.jsonl
 and summarized at:
-  OOD_exp/outputs/videos/soft_success/<task_name>/soft_success_summary.csv
+  OOD_exp/dif_start_end_loc/outputs/videos/soft_success/<task_name>/soft_success_summary.csv
 
 Per-chunk hidden-state files are expected to be saved by the websocket policy
 server under:

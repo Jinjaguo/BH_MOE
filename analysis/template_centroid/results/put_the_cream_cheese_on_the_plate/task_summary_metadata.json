@@ -1,0 +1,32 @@
+{
+  "task_name": "put_the_cream_cheese_on_the_plate",
+  "output_dir": "analysis/template_centroid/results/put_the_cream_cheese_on_the_plate",
+  "fields": [
+    "action_head_input",
+    "chunk_vector_mean"
+  ],
+  "failure_mode": "wrong_receptacle",
+  "inputs": {
+    "rollout_manifest": "/home/jinjaguo/BH_MOE/OOD_exp/dif_start_end_loc/manifests/pi05_put_the_cream_cheese_on_the_plate_rollout_manifest.csv",
+    "chunk_manifest": "/home/jinjaguo/BH_MOE/OOD_exp/dif_start_end_loc/manifests/pi05_put_the_cream_cheese_on_the_plate_chunk_manifest.csv",
+    "label_csv": "/home/jinjaguo/BH_MOE/OOD_exp/dif_start_end_loc/annotations/put_the_cream_cheese_on_the_plate_label_review.csv",
+    "intervention_task_root": "/home/jinjaguo/BH_MOE/OOD_exp/dif_start_end_loc/outputs/chunk_wise/put_the_cream_cheese_on_the_plate_soft_success",
+    "intervention_summary": "/home/jinjaguo/BH_MOE/OOD_exp/dif_start_end_loc/outputs/videos/soft_success/put_the_cream_cheese_on_the_plate_soft_success/soft_success_summary.csv"
+  },
+  "counts": {
+    "rollout_manifest_rows": 53,
+    "chunk_manifest_rows": 2447,
+    "label_csv_rows": 53,
+    "latent_paths_in_chunk_manifest": 2447,
+    "existing_latent_paths": 2447
+  },
+  "standard_figures": [
+    "normalized_full_rollout_margin_curve.png",
+    "normalized_cosine_drift_curve.png",
+    "template_switch_rate_boxplot.png",
+    "template_entropy_boxplot.png",
+    "margin_variance_boxplot.png",
+    "nearest_template_distribution.png",
+    "rollout_margin_heatmap.png"
+  ]
+}

@@ -29,17 +29,17 @@ Arguments
 Usage
 -----
 python scripts/build_ood_manifests.py \
-    --task-dir OOD_exp/outputs/chunk_wise/put_the_cream_cheese_on_the_plate \
+    --task-dir OOD_exp/dif_start_end_loc/outputs/chunk_wise/put_the_cream_cheese_on_the_plate \
     --task-name put_the_cream_cheese_on_the_plate \
     --model pi05 \
     --dataset libero_ood \
     --ood-type diff_start_end_loc \
-    --output-dir OOD_exp/manifests
+    --output-dir OOD_exp/dif_start_end_loc/manifests
 
 Outputs
 -------
-  OOD_exp/manifests/pi05_put_the_cream_cheese_on_the_plate_rollout_manifest.csv
-  OOD_exp/manifests/pi05_put_the_cream_cheese_on_the_plate_chunk_manifest.csv
+  OOD_exp/dif_start_end_loc/manifests/pi05_put_the_cream_cheese_on_the_plate_rollout_manifest.csv
+  OOD_exp/dif_start_end_loc/manifests/pi05_put_the_cream_cheese_on_the_plate_chunk_manifest.csv
 """
 
 from __future__ import annotations
@@ -108,13 +108,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--task-dir",
         type=Path,
-        default=Path("OOD_exp/outputs/chunk_wise/put_the_cream_cheese_on_the_plate"),
+        default=Path("OOD_exp/dif_start_end_loc/outputs/chunk_wise/put_the_cream_cheese_on_the_plate"),
     )
     parser.add_argument("--task-name", default="put_the_cream_cheese_on_the_plate")
     parser.add_argument("--model", default="pi05")
     parser.add_argument("--dataset", default="libero_ood")
     parser.add_argument("--ood-type", default="diff_start_end_loc")
-    parser.add_argument("--output-dir", type=Path, default=Path("OOD_exp/manifests"))
+    parser.add_argument("--output-dir", type=Path, default=Path("OOD_exp/dif_start_end_loc/manifests"))
     parser.add_argument("--early-chunk-threshold", type=int, default=5)
     return parser.parse_args()
 
@@ -167,10 +167,10 @@ def stable_chunk_uid(rollout_id: str, chunk_id: int) -> str:
 def find_video_path(task_name: str, trial_id: int, success: int) -> str:
     status = "success" if success else "failure"
     candidates = [
-        Path("OOD_exp/outputs/videos/libero_goal/dif_start_end_loc")
+        Path("OOD_exp/dif_start_end_loc/outputs/videos/libero_goal/dif_start_end_loc")
         / task_name
         / f"trial{trial_id}_{status}.mp4",
-        Path("OOD_exp/outputs/videos/libero_goal/diff_start_end_loc")
+        Path("OOD_exp/dif_start_end_loc/outputs/videos/libero_goal/diff_start_end_loc")
         / task_name
         / f"trial{trial_id}_{status}.mp4",
     ]

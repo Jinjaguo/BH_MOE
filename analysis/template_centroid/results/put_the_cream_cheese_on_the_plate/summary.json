@@ -1,5 +1,5 @@
 {
-  "chunk_manifest": "OOD_exp/manifests/pi05_put_the_cream_cheese_on_the_plate_chunk_manifest.csv",
+  "chunk_manifest": "/home/jinjaguo/BH_MOE/OOD_exp/dif_start_end_loc/manifests/pi05_put_the_cream_cheese_on_the_plate_chunk_manifest.csv",
   "output_dir": "analysis/template_centroid/results/put_the_cream_cheese_on_the_plate",
   "fields": [
     "action_head_input",

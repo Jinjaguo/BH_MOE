@@ -44,7 +44,7 @@ Outputs
 This helper does not save files by itself.
 Its JSON-serializable summary is intended to be written by
 `rollouts_state_record_helper.py` into:
-`OOD_exp/outputs/chunk_wise/<task_name>/trial_<trial_id>/`
+`OOD_exp/dif_start_end_loc/outputs/chunk_wise/<task_name>/trial_<trial_id>/`
 """
 
 from __future__ import annotations

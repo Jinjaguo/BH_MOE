@@ -52,6 +52,7 @@ REPO_ROOT = find_repo_root()
 DEFAULT_ROOT = (
     REPO_ROOT
     / "OOD_exp"
+    / "dif_start_end_loc"
     / "outputs"
     / "chunk_wise"
     / "put_the_cream_cheese_on_the_plate"

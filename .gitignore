@@ -1,7 +1,12 @@
 __pycache__/
 *.pyc
 
-OOD_exp/outputs/
+OOD_exp/dif_start_end_loc/outputs/
+OOD_exp/**/*.pt
+OOD_exp/**/*.mp4
+OOD_exp/**/*.avi
+OOD_exp/**/*.mov
+OOD_exp/**/*.mkv
 
 .codex
 

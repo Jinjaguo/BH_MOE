@@ -21,7 +21,7 @@ Parameters
 Usage
 -----
 python analysis/chunk_analysis/06_phase_structure_discovery.py \
-    --root OOD_exp/outputs/chunk_wise/put_the_cream_cheese_on_the_plate \
+    --root OOD_exp/dif_start_end_loc/outputs/chunk_wise/put_the_cream_cheese_on_the_plate \
     --out_dir analysis/chunk_analysis/results/put_the_cream_cheese_on_the_plate \
     --method pca
 

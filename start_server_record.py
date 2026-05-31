@@ -38,7 +38,7 @@ python /home/jinjaguo/BH_MOE/start_server_record.py --env pi05_libero
 
 python /home/jinjaguo/BH_MOE/start_server_record.py \
   --env pi05_libero \
-  --trace_root /home/jinjaguo/BH_MOE/OOD_exp/outputs/chunk_wise \
+  --trace_root /home/jinjaguo/BH_MOE/OOD_exp/dif_start_end_loc/outputs/chunk_wise \
   --default_task_name libero_debug_run
 
 Outputs
@@ -86,7 +86,7 @@ from openpi.training import config as _config
 
 
 #TODO : change your root here !!
-DEFAULT_TRACE_ROOT = pathlib.Path("/home/jinjaguo/BH_MOE/OOD_exp/outputs/chunk_wise")
+DEFAULT_TRACE_ROOT = pathlib.Path("/home/jinjaguo/BH_MOE/OOD_exp/dif_start_end_loc/outputs/chunk_wise")
 
 
 class EnvMode(enum.Enum):

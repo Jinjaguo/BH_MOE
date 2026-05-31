@@ -45,7 +45,7 @@ Arguments
 Usage
 -----
 python analysis/template_centroid/01_template_centroid_analysis.py \
-    --chunk-manifest OOD_exp/manifests/pi05_put_the_cream_cheese_on_the_plate_chunk_manifest.csv \
+    --chunk-manifest OOD_exp/dif_start_end_loc/manifests/pi05_put_the_cream_cheese_on_the_plate_chunk_manifest.csv \
     --output-dir analysis/template_centroid/results/put_the_cream_cheese_on_the_plate \
     --fields action_head_input chunk_vector_mean \
     --failure-mode wrong_receptacle \
@@ -90,7 +90,7 @@ import numpy as np
 
 
 DEFAULT_CHUNK_MANIFEST = Path(
-    "OOD_exp/manifests/pi05_put_the_cream_cheese_on_the_plate_chunk_manifest.csv"
+    "OOD_exp/dif_start_end_loc/manifests/pi05_put_the_cream_cheese_on_the_plate_chunk_manifest.csv"
 )
 DEFAULT_OUTPUT_DIR = Path(
     "analysis/template_centroid/results/put_the_cream_cheese_on_the_plate"
@@ -128,13 +128,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--intervention-task-root",
         type=Path,
-        default=Path("OOD_exp/outputs/chunk_wise/put_the_cream_cheese_on_the_plate_soft_success"),
+        default=Path("OOD_exp/dif_start_end_loc/outputs/chunk_wise/put_the_cream_cheese_on_the_plate_soft_success"),
     )
     parser.add_argument(
         "--intervention-summary",
         type=Path,
         default=Path(
-            "OOD_exp/outputs/videos/soft_success/"
+            "OOD_exp/dif_start_end_loc/outputs/videos/soft_success/"
             "put_the_cream_cheese_on_the_plate_soft_success/soft_success_summary.csv"
         ),
     )

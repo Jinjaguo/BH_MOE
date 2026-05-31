@@ -45,7 +45,7 @@ from action_chunk_record_helper import HiddenStateTracingPolicy
 
 wrapped = HiddenStateTracingPolicy(
     policy=policy,
-    record_root="OOD_exp/outputs/chunk_wise",
+    record_root="OOD_exp/dif_start_end_loc/outputs/chunk_wise",
     default_task_name="put_the_bowl_on_the_rack",
 )
 

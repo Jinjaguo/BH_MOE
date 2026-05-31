@@ -10,7 +10,7 @@ task, it:
 2. Sends explicit `task_name`, `trial_id`, and `chunk_id` with every websocket
    request.
 3. Saves rollout videos.
-4. Writes chunk/trial metadata under `OOD_exp/outputs/chunk_wise/`.
+4. Writes chunk/trial metadata under `OOD_exp/dif_start_end_loc/outputs/chunk_wise/`.
 5. Stops a task once it has at least the target number of successful rollouts
    and failed rollouts, or when the trial cap is reached.
 
@@ -45,10 +45,10 @@ python /home/jinjaguo/BH_MOE/ood_libero_rollouts.py \
 Outputs
 -------
 Videos are saved under:
-`OOD_exp/outputs/videos/<suite_name>/<relative_task_dir>/<task_name>/`
+`OOD_exp/dif_start_end_loc/outputs/videos/<suite_name>/<relative_task_dir>/<task_name>/`
 
 Chunk-wise trial metadata is saved under:
-`OOD_exp/outputs/chunk_wise/<task_name>/trial_<trial_id>/`
+`OOD_exp/dif_start_end_loc/outputs/chunk_wise/<task_name>/trial_<trial_id>/`
 """
 
 import argparse
@@ -69,8 +69,9 @@ from scripts.rollouts_state_record_helper import TrialLogger, sanitize_task_name
 
 LIBERO_DUMMY_ACTION = [0.0] * 6 + [-1.0]
 DEFAULT_LIBERO_ROOT = pathlib.Path.home() / "LIBERO"
-DEFAULT_OUTPUT_ROOT = pathlib.Path(__file__).resolve().parent / "OOD_exp" / "outputs" / "videos"
-DEFAULT_CHUNK_ROOT = pathlib.Path(__file__).resolve().parent / "OOD_exp" / "outputs" / "chunk_wise"
+DEFAULT_OOD_ROOT = pathlib.Path(__file__).resolve().parent / "OOD_exp" / "dif_start_end_loc"
+DEFAULT_OUTPUT_ROOT = DEFAULT_OOD_ROOT / "outputs" / "videos"
+DEFAULT_CHUNK_ROOT = DEFAULT_OOD_ROOT / "outputs" / "chunk_wise"
 
 
 def quat2axisangle(quat: np.ndarray) -> np.ndarray:

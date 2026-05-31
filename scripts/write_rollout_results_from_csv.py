@@ -27,15 +27,15 @@ Arguments
 Usage
 -----
 python scripts/write_rollout_results_from_csv.py \
-    --csv OOD_exp/annotations/put_the_cream_cheese_on_the_plate_label_review.csv \
-    --task-root OOD_exp/outputs/chunk_wise/put_the_cream_cheese_on_the_plate \
+    --csv OOD_exp/dif_start_end_loc/annotations/put_the_cream_cheese_on_the_plate_label_review.csv \
+    --task-root OOD_exp/dif_start_end_loc/outputs/chunk_wise/put_the_cream_cheese_on_the_plate \
     --task-name put_the_cream_cheese_on_the_plate \
     --out-name rollout_result.json
 
 Outputs
 -------
 Writes one file per CSV row under:
-  OOD_exp/outputs/chunk_wise/put_the_cream_cheese_on_the_plate/trial_<id>/rollout_result.json
+  OOD_exp/dif_start_end_loc/outputs/chunk_wise/put_the_cream_cheese_on_the_plate/trial_<id>/rollout_result.json
 """
 
 from __future__ import annotations
