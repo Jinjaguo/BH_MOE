@@ -351,9 +351,16 @@ def iter_bddl_files_from_tasks_info(tasks_info: pathlib.Path, input_dir: pathlib
         if not line:
             continue
         rel_path = pathlib.Path(line)
+        if rel_path.is_absolute():
+            yield rel_path.resolve()
+            continue
         if rel_path.parts and rel_path.parts[0] == input_dir.name:
             rel_path = pathlib.Path(*rel_path.parts[1:])
-        yield (input_dir / rel_path).resolve()
+        candidate = (input_dir / rel_path).resolve()
+        if candidate.exists():
+            yield candidate
+            continue
+        yield (input_dir / rel_path.name).resolve()
 
 
 def task_has_existing_results(*, output_dir: pathlib.Path, chunk_root: pathlib.Path, task_name: str) -> bool:
@@ -409,6 +416,7 @@ def main():
     args = parser.parse_args()
 
     input_dir = args.input_dir.expanduser().resolve()
+    print(f"input dir path: {input_dir}")
     if not input_dir.exists():
         raise FileNotFoundError(f"Input directory does not exist: {input_dir}")
 

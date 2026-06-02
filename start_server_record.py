@@ -86,7 +86,7 @@ from openpi.training import config as _config
 
 
 #TODO : change your root here !!
-DEFAULT_TRACE_ROOT = pathlib.Path("/home/jinjaguo/BH_MOE/OOD_exp/dif_start_end_loc/outputs/chunk_wise")
+DEFAULT_TRACE_ROOT = pathlib.Path("/home/jinjaguo/BH_MOE/OOD_exp/change_pos/outputs/chunk_wise")
 
 
 class EnvMode(enum.Enum):

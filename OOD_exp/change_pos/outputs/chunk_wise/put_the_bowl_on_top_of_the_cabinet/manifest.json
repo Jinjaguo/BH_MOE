@@ -1,0 +1,12 @@
+{
+  "task_name": "put_the_bowl_on_top_of_the_cabinet",
+  "record_dir": "/home/jinjaguo/BH_MOE/OOD_exp/change_pos/outputs/chunk_wise/put_the_bowl_on_top_of_the_cabinet",
+  "format": "torch_save_dict",
+  "fields": [
+    "text_encoder_output",
+    "cross_attention_action_x_after",
+    "action_head_input",
+    "chunk_vector_mean",
+    "action_chunk_output"
+  ]
+}
