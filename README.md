@@ -146,10 +146,11 @@ source .venv/bin/activate
 python /home/jinjaguo/BH_MOE/start_server_record.py --env pi0_libero
 ```
 
-This server saves hidden states to:
+The server saves hidden states to the `trace_root` sent by the rollout client.
+For OOD rollouts this normally becomes:
 
 ```text
-/home/jinjaguo/BH_MOE/OOD_exp/dif_start_end_loc/outputs/chunk_wise/<task_name>/trial_<trial_id>/chunk_<chunk_id>.pt
+/home/jinjaguo/BH_MOE/OOD_exp/<experiment_name>/outputs/chunk_wise/<task_name>/trial_<trial_id>/chunk_<chunk_id>.pt
 ```
 
 ### Terminal B: run OOD rollouts
@@ -159,18 +160,31 @@ conda activate libero
 cd /home/jinjaguo/BH_MOE
 python ood_libero_rollouts.py \
   --input_dir /home/jinjaguo/BH_MOE/custom_bddl/libero_goal \
-  --tasks_info /home/jinjaguo/BH_MOE/custom_bddl/libero_goal/tasks_info.txt \
+  --tasks_info /home/jinjaguo/BH_MOE/custom_bddl/libero_goal/dif_start_end_loc/tasks_info.txt \
   --libero_root /home/jinjaguo/LIBERO \
   --host localhost \
   --port 8000
+```
 
-The default output path is for task dif_start_and_loc. If the task is changed, please use arguments:
+The experiment output folder is inferred from the parent directory of
+`--tasks_info`. For example, `.../dif_start_end_loc/tasks_info.txt` writes under
+`OOD_exp/dif_start_end_loc/`. You can override this name explicitly:
+
+```bash
 python ood_libero_rollouts.py \
   --input_dir /home/jinjaguo/BH_MOE/custom_bddl/libero_goal \
-  --tasks_info /home/jinjaguo/BH_MOE/custom_bddl/libero_goal/tasks_info.txt \
+  --tasks_info /home/jinjaguo/BH_MOE/custom_bddl/libero_goal/<exp_name>/tasks_info.txt \
   --libero_root /home/jinjaguo/LIBERO \
-  --output_root /home/jinjaguo/BH_MOE/OOD_exp/your_task_name/outputs/videos \
-  --chunk_root /home/jinjaguo/BH_MOE/OOD_exp/your_task_name/outputs/chunk_wise \
+  --host localhost \
+  --port 8000
+```
+Or
+```bash
+python ood_libero_rollouts.py \
+  --input_dir /home/jinjaguo/BH_MOE/custom_bddl/libero_goal \
+  --tasks_info /home/jinjaguo/BH_MOE/custom_bddl/libero_goal/change_pos/tasks_info.txt \
+  --libero_root /home/jinjaguo/LIBERO \
+  --experiment_name <experiment_name> \
   --host localhost \
   --port 8000
 ```
@@ -207,20 +221,20 @@ python ood_libero_rollouts.py \
 Server-side chunk hidden states:
 
 ```text
-OOD_exp/dif_start_end_loc/outputs/chunk_wise/<task_name>/trial_<trial_id>/chunk_<chunk_id>.pt
+OOD_exp/<experiment_name>/outputs/chunk_wise/<task_name>/trial_<trial_id>/chunk_<chunk_id>.pt
 ```
 
 Rollout-side trial metadata:
 
 ```text
-OOD_exp/dif_start_end_loc/outputs/chunk_wise/<task_name>/trial_<trial_id>/rollouts_state_record.jsonl
-OOD_exp/dif_start_end_loc/outputs/chunk_wise/<task_name>/trial_<trial_id>/rollouts_finalize.jsonl
+OOD_exp/<experiment_name>/outputs/chunk_wise/<task_name>/trial_<trial_id>/rollouts_state_record.jsonl
+OOD_exp/<experiment_name>/outputs/chunk_wise/<task_name>/trial_<trial_id>/rollouts_finalize.jsonl
 ```
 
 Rollout videos:
 
 ```text
-OOD_exp/dif_start_end_loc/outputs/videos/<suite_name>/<relative_task_dir>/<task_name>/
+OOD_exp/<experiment_name>/outputs/videos/<task_name>/
 ```
 
 ## Minimal run example

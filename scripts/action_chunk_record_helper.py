@@ -28,11 +28,14 @@ For each emitted action chunk, this helper records:
 
 Arguments
 ---------
-`HiddenStateTracingPolicy(policy, record_root, default_task_name=None, disable_torch_compile=True)`
+`HiddenStateTracingPolicy(policy, record_root=None, default_task_name=None, disable_torch_compile=True)`
   `policy`:
     The already-created OpenPI policy instance to wrap.
   `record_root`:
-    Root directory where per-task trace folders are saved.
+    Optional fallback root directory where per-task trace folders are saved.
+    If the websocket request contains `trace_root`, that request value is used
+    instead so rollout-side metadata and server-side hidden states can share one
+    chunk_wise directory.
   `default_task_name`:
     Deprecated fallback task name. Request payloads are expected to provide
     `task_name`, `trial_id`, and `chunk_id` explicitly.
@@ -45,10 +48,10 @@ from action_chunk_record_helper import HiddenStateTracingPolicy
 
 wrapped = HiddenStateTracingPolicy(
     policy=policy,
-    record_root="OOD_exp/dif_start_end_loc/outputs/chunk_wise",
     default_task_name="put_the_bowl_on_the_rack",
 )
 
+obs["trace_root"] = "OOD_exp/change_pos/outputs/chunk_wise"
 result = wrapped.infer(obs)
 
 Outputs
@@ -226,14 +229,15 @@ class HiddenStateTracingPolicy:
     def __init__(
         self,
         policy: Any,
-        record_root: str | pathlib.Path,
+        record_root: str | pathlib.Path | None = None,
         *,
         default_task_name: str | None = None,
         disable_torch_compile: bool = True,
     ):
         self._policy = policy
-        self._record_root = pathlib.Path(record_root).expanduser().resolve()
-        self._record_root.mkdir(parents=True, exist_ok=True)
+        self._record_root = pathlib.Path(record_root).expanduser().resolve() if record_root is not None else None
+        if self._record_root is not None:
+            self._record_root.mkdir(parents=True, exist_ok=True)
         self._default_task_name = _sanitize_name(default_task_name, "default_task")
 
         if not getattr(policy, "_is_pytorch_model", False):
@@ -261,11 +265,12 @@ class HiddenStateTracingPolicy:
         self._validate_request_ids(obs)
         task_name = _sanitize_name(obs.get("task_name"), self._default_task_name)
         trial_id, chunk_id = self._next_ids(obs)
+        record_root = self._resolve_record_root(obs)
         self._collector.start()
         try:
             result = self._policy.infer(obs, noise=noise)
             trace = self._collector.finish(result["actions"])
-            self._save_trace(obs, task_name, trial_id, chunk_id, trace)
+            self._save_trace(obs, record_root, task_name, trial_id, chunk_id, trace)
             return result
         except Exception:
             self._collector.reset()
@@ -285,15 +290,30 @@ class HiddenStateTracingPolicy:
         if missing:
             raise KeyError(f"Policy request is missing required tracing ids: {missing}")
 
+    def _resolve_record_root(self, obs: dict[str, Any]) -> pathlib.Path:
+        request_trace_root = obs.get("trace_root")
+        if request_trace_root:
+            record_root = pathlib.Path(str(request_trace_root)).expanduser().resolve()
+        elif self._record_root is not None:
+            record_root = self._record_root
+        else:
+            raise KeyError(
+                "Policy request is missing `trace_root` and the server was started without --trace_root. "
+                "Pass trace_root from the rollout client or start the server with --trace_root."
+            )
+        record_root.mkdir(parents=True, exist_ok=True)
+        return record_root
+
     def _save_trace(
         self,
         obs: dict[str, Any],
+        record_root: pathlib.Path,
         task_name: str,
         trial_id: str,
         chunk_id: int,
         trace: dict[str, Any],
     ) -> None:
-        task_dir = self._record_root / task_name
+        task_dir = record_root / task_name
         task_dir.mkdir(parents=True, exist_ok=True)
 
         manifest_path = task_dir / "manifest.json"
@@ -325,6 +345,7 @@ class HiddenStateTracingPolicy:
                 "task_name": task_name,
                 "trial_id": trial_id,
                 "chunk_id": chunk_id,
+                "trace_root": str(record_root),
                 "prompt": _safe_prompt(obs),
                 "observation_done_flag": bool(obs.get("done", False)),
             },

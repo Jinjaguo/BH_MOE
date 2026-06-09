@@ -17,8 +17,9 @@ For each BDDL task, it:
 2. Sends explicit `task_name`, `trial_id`, and `chunk_id` with every websocket
    request.
 3. Saves rollout videos.
-4. Stops a task once it has at least the target number of successful rollouts
-   and failed rollouts, or when the trial cap is reached.
+4. Stops after a small diagnostic number of trials by default. Attention
+   tracing is intended to inspect action-token attention, not to collect large
+   success/failure rollout datasets.
 
 Arguments
 ---------
@@ -28,12 +29,8 @@ Arguments
   Optional task list file containing relative BDDL paths.
 `--libero_root`
   Path to the LIBERO checkout.
-`--target_successes`
-  Minimum number of successful trials to collect per task.
-`--target_failures`
-  Minimum number of failed trials to collect per task.
 `--max_trials`
-  Maximum number of trials to run per task.
+  Maximum number of trials to run per task. Defaults to 1.
 `--host/--port`
   OpenPI websocket server address.
 `--output_root`
@@ -46,7 +43,8 @@ python /home/jinjaguo/BH_MOE/attention_analysis/attention_rollouts.py \
   --tasks_info /home/jinjaguo/BH_MOE/custom_bddl/libero_goal/tasks_info.txt \
   --libero_root /home/jinjaguo/LIBERO \
   --host localhost \
-  --port 8000
+  --port 8000 \
+  --max_trials 1
 
 Outputs
 -------
@@ -290,8 +288,6 @@ def collect_task_trials(
     wait_steps: int,
     max_steps: int,
     replan_steps: int,
-    target_successes: int,
-    target_failures: int,
     max_trials: int,
     seed: int,
     placement_retries: int,
@@ -302,8 +298,6 @@ def collect_task_trials(
     print(f"Running task: {bddl_path}")
     print(f"Prompt text: {prompt_text}")
     print(f"Output dir: {output_dir}")
-    print(f"Target successes: {target_successes}")
-    print(f"Target failures: {target_failures}")
     print(f"Max trials: {max_trials}")
 
     successes = 0
@@ -354,13 +348,9 @@ def collect_task_trials(
 
         print(
             f"  trial={trial_id} done={done} steps={t} video={video_path} "
-            f"progress: success={successes}/{target_successes}, failure={failures}/{target_failures}, "
+            f"progress: success={successes}, failure={failures}, "
             f"trials={trials_run}/{max_trials}"
         )
-
-        if successes >= target_successes and failures >= target_failures:
-            print(f"  reached both success/failure targets for {bddl_path.name}; moving to next task")
-            break
 
     return successes, failures, trials_run
 
@@ -459,9 +449,7 @@ def main():
     parser.add_argument("--wait_steps", type=int, default=10)
     parser.add_argument("--max_steps", type=int, default=300)
     parser.add_argument("--replan_steps", type=int, default=5)
-    parser.add_argument("--target_successes", type=int, default=20)
-    parser.add_argument("--target_failures", type=int, default=20)
-    parser.add_argument("--max_trials", type=int, default=100)
+    parser.add_argument("--max_trials", type=int, default=5)
     parser.add_argument(
         "--placement_retries",
         type=int,
@@ -536,16 +524,14 @@ def main():
             wait_steps=args.wait_steps,
             max_steps=args.max_steps,
             replan_steps=args.replan_steps,
-            target_successes=args.target_successes,
-            target_failures=args.target_failures,
             max_trials=args.max_trials,
             seed=args.seed,
             placement_retries=args.placement_retries,
             save_wrist=args.save_wrist,
         )
         print(
-            f"Finished task {task_name}: success={successes}/{args.target_successes}, "
-            f"failure={failures}/{args.target_failures}, trials_run={trials_run}/{args.max_trials}"
+            f"Finished task {task_name}: success={successes}, "
+            f"failure={failures}, trials_run={trials_run}/{args.max_trials}"
         )
 
 

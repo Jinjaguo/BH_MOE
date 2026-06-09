@@ -8,9 +8,10 @@ This is the main rollout entry point for OOD LIBERO evaluation. For each BDDL
 task, it:
 1. Repeatedly rolls out the task.
 2. Sends explicit `task_name`, `trial_id`, and `chunk_id` with every websocket
-   request.
+   request, plus `trace_root` so the server saves hidden states into the same
+   chunk_wise directory as rollout metadata.
 3. Saves rollout videos.
-4. Writes chunk/trial metadata under `OOD_exp/dif_start_end_loc/outputs/chunk_wise/`.
+4. Writes chunk/trial metadata under `OOD_exp/<experiment_name>/outputs/chunk_wise/`.
 5. Stops a task once it has at least the target number of successful rollouts
    and failed rollouts, or when the trial cap is reached.
 
@@ -30,14 +31,22 @@ Arguments
   Maximum number of trials to run per task.
 `--host/--port`
   OpenPI websocket server address.
+`--experiment_name`
+  Optional experiment folder under `OOD_exp`. Defaults to the parent folder of
+  `--tasks_info`, for example `change_pos`.
+`--output_root`
+  Optional video root. Defaults to
+  `OOD_exp/<experiment_name>/outputs/videos`.
 `--chunk_root`
-  Root folder for chunk-wise rollout metadata.
+  Optional chunk-wise root. Defaults to
+  `OOD_exp/<experiment_name>/outputs/chunk_wise`. This same path is sent to the
+  policy server as `trace_root` for hidden-state `.pt` files.
 
 Examples
 --------
 python /home/jinjaguo/BH_MOE/ood_libero_rollouts.py \
   --input_dir /home/jinjaguo/BH_MOE/custom_bddl/libero_goal \
-  --tasks_info /home/jinjaguo/BH_MOE/custom_bddl/libero_goal/tasks_info.txt \
+  --tasks_info /home/jinjaguo/BH_MOE/custom_bddl/libero_goal/change_pos/tasks_info.txt \
   --libero_root /home/jinjaguo/LIBERO \
   --host localhost \
   --port 8000
@@ -45,10 +54,10 @@ python /home/jinjaguo/BH_MOE/ood_libero_rollouts.py \
 Outputs
 -------
 Videos are saved under:
-`OOD_exp/dif_start_end_loc/outputs/videos/<suite_name>/<relative_task_dir>/<task_name>/`
+`OOD_exp/<experiment_name>/outputs/videos/<task_name>/`
 
-Chunk-wise trial metadata is saved under:
-`OOD_exp/dif_start_end_loc/outputs/chunk_wise/<task_name>/trial_<trial_id>/`
+Chunk-wise trial metadata and server-side hidden states are saved under:
+`OOD_exp/<experiment_name>/outputs/chunk_wise/<task_name>/trial_<trial_id>/`
 """
 
 import argparse
@@ -71,9 +80,7 @@ from scripts.rollouts_state_record_helper import TrialLogger, sanitize_task_name
 
 LIBERO_DUMMY_ACTION = [0.0] * 6 + [-1.0]
 DEFAULT_LIBERO_ROOT = pathlib.Path.home() / "LIBERO"
-DEFAULT_OOD_ROOT = pathlib.Path(__file__).resolve().parent / "OOD_exp" / "dif_start_end_loc"
-DEFAULT_OUTPUT_ROOT = DEFAULT_OOD_ROOT / "outputs" / "videos"
-DEFAULT_CHUNK_ROOT = DEFAULT_OOD_ROOT / "outputs" / "chunk_wise"
+REPO_ROOT = pathlib.Path(__file__).resolve().parent
 
 
 def quat2axisangle(quat: np.ndarray) -> np.ndarray:
@@ -258,6 +265,7 @@ def run_single_trial(
                 "observation/wrist_image": wrist_img,
                 "observation/state": state,
                 "prompt": str(prompt_text),
+                "trace_root": str(chunk_root),
             }
             req = logger.build_policy_payload(base_payload=base_payload)
             received = policy.infer(req)
@@ -390,13 +398,63 @@ def iter_bddl_files_from_tasks_info(tasks_info: pathlib.Path, input_dir: pathlib
         if rel_path.is_absolute():
             yield rel_path.resolve()
             continue
-        if rel_path.parts and rel_path.parts[0] == input_dir.name:
-            rel_path = pathlib.Path(*rel_path.parts[1:])
-        candidate = (input_dir / rel_path).resolve()
-        if candidate.exists():
-            yield candidate
-            continue
-        yield (input_dir / rel_path.name).resolve()
+
+        candidates = []
+        rel_variants = [rel_path]
+        parts = rel_path.parts
+        if parts and parts[0] == input_dir.name:
+            rel_variants.append(pathlib.Path(*parts[1:]))
+        if len(parts) >= 3 and parts[0] == "libero" and parts[1] == "bddl_files":
+            libero_rel = pathlib.Path(*parts[2:])
+            rel_variants.append(libero_rel)
+            if libero_rel.parts and libero_rel.parts[0] == input_dir.name:
+                rel_variants.append(pathlib.Path(*libero_rel.parts[1:]))
+
+        for variant in rel_variants:
+            candidates.append((tasks_info.parent / variant).resolve())
+            candidates.append((input_dir / variant).resolve())
+            candidates.append((tasks_info.parent / variant.name).resolve())
+            candidates.append((input_dir / variant.name).resolve())
+
+        seen_candidates = []
+        for candidate in candidates:
+            if candidate in seen_candidates:
+                continue
+            seen_candidates.append(candidate)
+            if candidate.exists():
+                yield candidate
+                break
+        else:
+            candidate_lines = "\n".join(f"  - {path}" for path in seen_candidates)
+            raise FileNotFoundError(
+                f"Could not resolve BDDL path from tasks_info line: {line}\n"
+                f"tasks_info: {tasks_info}\n"
+                f"input_dir: {input_dir}\n"
+                f"Tried:\n{candidate_lines}"
+            )
+
+
+def infer_experiment_name(input_dir: pathlib.Path, tasks_info: Optional[pathlib.Path], explicit_name: Optional[str]) -> str:
+    if explicit_name:
+        return sanitize_task_name(explicit_name)
+    if tasks_info is not None:
+        return sanitize_task_name(tasks_info.parent.name)
+    return sanitize_task_name(input_dir.name)
+
+
+def resolve_output_roots(
+    *,
+    input_dir: pathlib.Path,
+    tasks_info: Optional[pathlib.Path],
+    experiment_name: Optional[str],
+    output_root: Optional[pathlib.Path],
+    chunk_root: Optional[pathlib.Path],
+) -> Tuple[str, pathlib.Path, pathlib.Path]:
+    resolved_experiment_name = infer_experiment_name(input_dir, tasks_info, experiment_name)
+    experiment_root = REPO_ROOT / "OOD_exp" / resolved_experiment_name
+    resolved_output_root = output_root.expanduser().resolve() if output_root is not None else experiment_root / "outputs" / "videos"
+    resolved_chunk_root = chunk_root.expanduser().resolve() if chunk_root is not None else experiment_root / "outputs" / "chunk_wise"
+    return resolved_experiment_name, resolved_output_root, resolved_chunk_root
 
 
 def task_has_existing_results(*, output_dir: pathlib.Path, chunk_root: pathlib.Path, task_name: str) -> bool:
@@ -439,8 +497,14 @@ def main():
         default=20,
         help="Retry environment construction with different seeds when BDDL placement sampling fails.",
     )
-    parser.add_argument("--output_root", type=pathlib.Path, default=DEFAULT_OUTPUT_ROOT)
-    parser.add_argument("--chunk_root", type=pathlib.Path, default=DEFAULT_CHUNK_ROOT)
+    parser.add_argument(
+        "--experiment_name",
+        type=str,
+        default=None,
+        help="Experiment folder under OOD_exp. Defaults to tasks_info parent name, or input_dir name.",
+    )
+    parser.add_argument("--output_root", type=pathlib.Path, default=None)
+    parser.add_argument("--chunk_root", type=pathlib.Path, default=None)
     parser.add_argument(
         "--skip_existing",
         dest="skip_existing",
@@ -465,6 +529,7 @@ def main():
     offscreen_env_cls = import_libero_modules(args.libero_root)
     policy = WebsocketClientPolicy(host=args.host, port=args.port)
 
+    tasks_info = None
     if args.tasks_info is not None:
         tasks_info = args.tasks_info.expanduser().resolve()
         if not tasks_info.exists():
@@ -476,11 +541,20 @@ def main():
     if not bddl_files:
         raise FileNotFoundError(f"No .bddl files found under: {input_dir}")
 
-    suite_name = input_dir.name
-    print(f"Suit name: {suite_name}")
+    experiment_name, output_root, chunk_root = resolve_output_roots(
+        input_dir=input_dir,
+        tasks_info=tasks_info,
+        experiment_name=args.experiment_name,
+        output_root=args.output_root,
+        chunk_root=args.chunk_root,
+    )
+
+    suite_name = experiment_name
+    print(f"Experiment name: {experiment_name}")
     print(f"LIBERO source: {args.libero_root.expanduser().resolve()}")
     print(f"Input dir: {input_dir}")
-    print(f"Detected suite root: {suite_name}")
+    print(f"Output root: {output_root}")
+    print(f"Chunk root: {chunk_root}")
     print(f"Found {len(bddl_files)} BDDL files")
 
     for bddl_path in bddl_files:
@@ -489,13 +563,12 @@ def main():
 
         prompt_text = read_prompt_for_bddl(bddl_path)
         task_name = sanitize_task_name(bddl_path.stem)
-        rel_parent = bddl_path.parent.relative_to(input_dir)
-        output_dir = args.output_root / suite_name / rel_parent / task_name
+        output_dir = output_root / task_name
         print(f"Output path: {output_dir}")
 
         if args.skip_existing and task_has_existing_results(
             output_dir=output_dir,
-            chunk_root=args.chunk_root,
+            chunk_root=chunk_root,
             task_name=task_name,
         ):
             print(f"Skipping task {task_name}: existing rollout outputs detected")
@@ -506,7 +579,7 @@ def main():
             prompt_text=prompt_text,
             task_name=task_name,
             output_dir=output_dir,
-            chunk_root=args.chunk_root,
+            chunk_root=chunk_root,
             policy=policy,
             offscreen_env_cls=offscreen_env_cls,
             resolution=args.resolution,

@@ -2,7 +2,7 @@
 Purpose
 -------
 Start an OpenPI websocket policy server that records one hidden-state trace file
- for every emitted action chunk.
+for every emitted action chunk.
 
 This script mirrors `start_serve.py`, but wraps the policy with
 `HiddenStateTracingPolicy` so each server-side inference saves the five requested
@@ -24,7 +24,8 @@ Arguments
 `--record`
   Whether to also enable the original OpenPI `PolicyRecorder`.
 `--trace_root`
-  Root directory used to save hidden-state trace files.
+  Optional fallback root directory used to save hidden-state trace files when
+  the rollout request does not provide `trace_root`.
 `--default_task_name`
   Fallback task name when the websocket request does not provide `task_name`.
 `policy:checkpoint --policy.config ... --policy.dir ...`
@@ -38,13 +39,16 @@ python /home/jinjaguo/BH_MOE/start_server_record.py --env pi05_libero
 
 python /home/jinjaguo/BH_MOE/start_server_record.py \
   --env pi05_libero \
-  --trace_root /home/jinjaguo/BH_MOE/OOD_exp/dif_start_end_loc/outputs/chunk_wise \
   --default_task_name libero_debug_run
 
 Outputs
 -------
 Hidden-state trace files are saved under:
 `<trace_root>/<task_name>/trial_<trial_id>/chunk_<chunk_id>.pt`
+
+For OOD rollouts, `trace_root` is normally sent by `ood_libero_rollouts.py` in
+each websocket request, so the server and rollout metadata share the same
+chunk_wise directory.
 
 If `--record` is enabled, the original OpenPI policy recorder still writes to:
 `policy_records/`
@@ -85,10 +89,6 @@ from openpi.training import checkpoints as _checkpoints
 from openpi.training import config as _config
 
 
-#TODO : change your root here !!
-DEFAULT_TRACE_ROOT = pathlib.Path("/home/jinjaguo/BH_MOE/OOD_exp/change_pos/outputs/chunk_wise")
-
-
 class EnvMode(enum.Enum):
     """Supported environments."""
 
@@ -119,7 +119,7 @@ class Args:
     default_prompt: str | None = None
     port: int = 8000
     record: bool = False
-    trace_root: pathlib.Path = DEFAULT_TRACE_ROOT
+    trace_root: pathlib.Path | None = None
     default_task_name: str = "default_task"
     policy: Checkpoint | Default = dataclasses.field(default_factory=Default)
 
@@ -237,7 +237,10 @@ def main(args: Args) -> None:
     hostname = socket.gethostname()
     local_ip = socket.gethostbyname(hostname)
     logging.info("Creating trace-enabled server (host: %s, ip: %s)", hostname, local_ip)
-    logging.info("Saving hidden-state traces under: %s/<task_name>/trial_<trial_id>/", args.trace_root)
+    if args.trace_root is None:
+        logging.info("Hidden-state trace root will be read from each request's `trace_root` field.")
+    else:
+        logging.info("Fallback hidden-state trace root: %s/<task_name>/trial_<trial_id>/", args.trace_root)
 
     server = websocket_policy_server.WebsocketPolicyServer(
         policy=policy,

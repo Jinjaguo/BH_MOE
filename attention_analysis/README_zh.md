@@ -28,7 +28,8 @@ python attention_analysis/attention_rollouts.py \
   --tasks_info /home/jinjaguo/BH_MOE/custom_bddl/libero_goal/dif_start_end_loc/tasks_info.txt \
   --libero_root /home/jinjaguo/LIBERO \
   --host localhost \
-  --port 8000
+  --port 8000 \
+  --max_trials 1
 ```
 
 如果你只想跑某一个任务子目录，也可以把 `--input_dir` 指到子目录，此时可以省略 `--tasks_info`，脚本会自动使用该目录下的 `tasks_info.txt`：
@@ -38,7 +39,57 @@ python attention_analysis/attention_rollouts.py \
   --input_dir /home/jinjaguo/BH_MOE/custom_bddl/libero_goal/dif_start_end_loc \
   --libero_root /home/jinjaguo/LIBERO \
   --host localhost \
-  --port 8000
+  --port 8000 \
+  --max_trials 1
+```
+
+## `attention_rollouts.py` 参数说明
+
+这个脚本是给 attention 诊断用的，不是用来像 `ood_libero_rollouts.py` 那样收集大量成功/失败 trial。它不再提供 `target_successes/target_failures` 停止条件，只按 `--max_trials` 控制每个任务运行几次。
+
+```text
+--max_trials 1
+```
+
+常用参数：
+
+```text
+--input_dir
+  BDDL 根目录。可以是 custom_bddl/libero_goal，也可以直接指向某个子目录，
+  例如 custom_bddl/libero_goal/dif_start_end_loc。
+
+--tasks_info
+  可选任务列表。如果省略，脚本会优先使用 --input_dir/tasks_info.txt；
+  如果该文件不存在，就递归扫描 --input_dir 下的 .bddl 文件。
+  tasks_info 里支持 libero/bddl_files/<suite>/<task>.bddl 这种 LIBERO 原始格式，
+  会自动映射到 --input_dir/<suite>/<task>.bddl。
+
+--max_trials
+  每个任务最多跑几个 trial。attention 分析建议先用 1。
+
+--seed
+  LIBERO 环境初始 seed。不同 trial 会使用 seed + trial_id。
+
+--output_root
+  只保存 rollout video 的目录，默认是
+  attention_analysis/outputs/libero_rollouts/videos。
+
+--skip_existing / --no-skip-existing
+  默认会跳过已有视频的任务。如果你想复跑同一任务并重新请求 attention server，
+  使用 --no-skip-existing，或者换一个 --output_root。
+```
+
+最小 attention 诊断建议：
+
+```bash
+python attention_analysis/attention_rollouts.py \
+  --input_dir /home/jinjaguo/BH_MOE/custom_bddl/libero_goal \
+  --tasks_info /home/jinjaguo/BH_MOE/custom_bddl/libero_goal/libero_goal/tasks_info.txt \
+  --libero_root /home/jinjaguo/LIBERO \
+  --host localhost \
+  --port 8000 \
+  --max_trials 1 \
+  --no-skip-existing
 ```
 
 ## 输出位置
