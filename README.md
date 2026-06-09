@@ -163,6 +163,16 @@ python ood_libero_rollouts.py \
   --libero_root /home/jinjaguo/LIBERO \
   --host localhost \
   --port 8000
+
+The default output path is for task dif_start_and_loc. If the task is changed, please use arguments:
+python ood_libero_rollouts.py \
+  --input_dir /home/jinjaguo/BH_MOE/custom_bddl/libero_goal \
+  --tasks_info /home/jinjaguo/BH_MOE/custom_bddl/libero_goal/tasks_info.txt \
+  --libero_root /home/jinjaguo/LIBERO \
+  --output_root /home/jinjaguo/BH_MOE/OOD_exp/your_task_name/outputs/videos \
+  --chunk_root /home/jinjaguo/BH_MOE/OOD_exp/your_task_name/outputs/chunk_wise \
+  --host localhost \
+  --port 8000
 ```
 
 Current default stopping rule in `ood_libero_rollouts.py`:

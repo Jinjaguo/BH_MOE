@@ -1,6 +1,6 @@
 (define (problem LIBERO_Tabletop_Manipulation)
   (:domain robosuite)
-  (:language Put the cream cheese on the bowl)
+  (:language Open the door of the fridge and put the milk inside the lower region)
     (:regions
       (plate_region
           (:target main_table)
@@ -30,6 +30,13 @@
             )
           )
       )
+      (milk_region
+          (:target main_table)
+          (:ranges (
+              (0.08000000000000002 0.190000000000000005 0.10 0.21)
+            )
+          )
+      )
       (stove_front_region
           (:target main_table)
           (:ranges (
@@ -41,6 +48,17 @@
           (:target main_table)
           (:ranges (
               (0.02 -0.25 0.04 -0.23)
+            )
+          )
+          (:yaw_rotation (
+              (3.141592653589793 3.141592653589793)
+            )
+          )
+      )
+      (fridge_region
+          (:target main_table)
+          (:ranges (
+              (0.28 -0.12 0.30 -0.1)
             )
           )
           (:yaw_rotation (
@@ -90,6 +108,15 @@
       (top_region
           (:target wine_rack_1)
       )
+      (upper_region
+          (:target short_fridge_1)
+      )
+      (middle_region
+          (:target short_fridge_1)
+      )
+      (lower_region
+          (:target short_fridge_1)
+      )
     )
 
   (:fixtures
@@ -97,6 +124,7 @@
     wooden_cabinet_1 - wooden_cabinet
     flat_stove_1 - flat_stove
     wine_rack_1 - wine_rack
+    short_fridge_1 - short_fridge
   )
 
   (:objects
@@ -104,11 +132,12 @@
     cream_cheese_1 - cream_cheese
     wine_bottle_1 - wine_bottle
     plate_1 - plate
+    milk_1 - milk
   )
 
   (:obj_of_interest
-    cream_cheese_1
-    akita_black_bowl_1
+    milk_1
+    short_fridge_1_lower_region
   )
 
   (:init
@@ -119,10 +148,12 @@
     (On wooden_cabinet_1 main_table_cabinet_region)
     (On flat_stove_1 main_table_stove_region)
     (On wine_rack_1 main_table_wine_rack_region)
+    (On short_fridge_1 main_table_fridge_region)
+    (On milk_1 main_table_milk_region)
   )
 
   (:goal
-    (And (On cream_cheese_1 akita_black_bowl_1))
+    (And (In milk_1 short_fridge_1_lower_region))
   )
 
 )

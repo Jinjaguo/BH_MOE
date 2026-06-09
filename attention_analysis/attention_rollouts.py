@@ -1,17 +1,23 @@
 """
 Purpose
 -------
-Run OOD LIBERO BDDL tasks with the OpenPI websocket policy and collect both
-server-aligned chunk traces and rollout-side trial metadata.
+Run OOD LIBERO BDDL tasks with the OpenPI websocket policy and save rollout
+videos only.
 
-This is the main rollout entry point for OOD LIBERO evaluation. For each BDDL
-task, it:
+This is an attention-analysis copy of the repository-level
+`ood_libero_rollouts.py`. It keeps the same LIBERO action-inference behavior,
+but its default outputs live under `attention_analysis/outputs/libero_rollouts`
+so attention experiments do not overwrite earlier OOD_exp rollout results.
+This version intentionally does not write rollout-side chunk_wise metadata. It
+still sends `task_name`, `trial_id`, and `chunk_id` in each websocket request so
+the attention-tracing server can save its own chunk-aligned attention files.
+
+For each BDDL task, it:
 1. Repeatedly rolls out the task.
 2. Sends explicit `task_name`, `trial_id`, and `chunk_id` with every websocket
    request.
 3. Saves rollout videos.
-4. Writes chunk/trial metadata under `OOD_exp/dif_start_end_loc/outputs/chunk_wise/`.
-5. Stops a task once it has at least the target number of successful rollouts
+4. Stops a task once it has at least the target number of successful rollouts
    and failed rollouts, or when the trial cap is reached.
 
 Arguments
@@ -30,12 +36,12 @@ Arguments
   Maximum number of trials to run per task.
 `--host/--port`
   OpenPI websocket server address.
-`--chunk_root`
-  Root folder for chunk-wise rollout metadata.
+`--output_root`
+  Root folder for rollout videos.
 
 Examples
 --------
-python /home/jinjaguo/BH_MOE/ood_libero_rollouts.py \
+python /home/jinjaguo/BH_MOE/attention_analysis/attention_rollouts.py \
   --input_dir /home/jinjaguo/BH_MOE/custom_bddl/libero_goal \
   --tasks_info /home/jinjaguo/BH_MOE/custom_bddl/libero_goal/tasks_info.txt \
   --libero_root /home/jinjaguo/LIBERO \
@@ -45,10 +51,7 @@ python /home/jinjaguo/BH_MOE/ood_libero_rollouts.py \
 Outputs
 -------
 Videos are saved under:
-`OOD_exp/dif_start_end_loc/outputs/videos/<suite_name>/<relative_task_dir>/<task_name>/`
-
-Chunk-wise trial metadata is saved under:
-`OOD_exp/dif_start_end_loc/outputs/chunk_wise/<task_name>/trial_<trial_id>/`
+`attention_analysis/outputs/libero_rollouts/videos/<suite_name>/<relative_task_dir>/<task_name>/`
 """
 
 import argparse
@@ -66,14 +69,16 @@ from openpi_client import image_tools
 from openpi_client.websocket_client_policy import WebsocketClientPolicy
 from robosuite.utils.errors import RandomizationError
 
-from scripts.rollouts_state_record_helper import TrialLogger, sanitize_task_name
-
 
 LIBERO_DUMMY_ACTION = [0.0] * 6 + [-1.0]
 DEFAULT_LIBERO_ROOT = pathlib.Path.home() / "LIBERO"
-DEFAULT_OOD_ROOT = pathlib.Path(__file__).resolve().parent / "OOD_exp" / "dif_start_end_loc"
-DEFAULT_OUTPUT_ROOT = DEFAULT_OOD_ROOT / "outputs" / "videos"
-DEFAULT_CHUNK_ROOT = DEFAULT_OOD_ROOT / "outputs" / "chunk_wise"
+DEFAULT_ATTENTION_ROLLOUT_ROOT = pathlib.Path(__file__).resolve().parent / "outputs" / "libero_rollouts"
+DEFAULT_OUTPUT_ROOT = DEFAULT_ATTENTION_ROLLOUT_ROOT / "videos"
+
+
+def sanitize_task_name(task_name: str) -> str:
+    safe = str(task_name).strip().replace("/", "_").replace("\\", "_").replace(" ", "_")
+    return safe or "default_task"
 
 
 def quat2axisangle(quat: np.ndarray) -> np.ndarray:
@@ -202,27 +207,16 @@ def run_single_trial(
     prompt_text: str,
     task_name: str,
     trial_id: int,
-    ood_type: str,
     policy: WebsocketClientPolicy,
     resize: int,
     wait_steps: int,
     max_steps: int,
     replan_steps: int,
     save_wrist: bool,
-    chunk_root: pathlib.Path,
 ):
-    print(f"  [trial {trial_id}] creating TrialLogger", flush=True)
-    logger = TrialLogger(
-        task_name=task_name,
-        trial_id=trial_id,
-        ood_type=ood_type,
-        chunk_root=chunk_root,
-    )
-
     print(f"  [trial {trial_id}] calling env.reset()", flush=True)
     obs = env.reset()
     print(f"  [trial {trial_id}] env.reset() done", flush=True)
-    logger.observe_event_source(obs=obs, info=None)
 
     done = False
     t = 0
@@ -230,6 +224,7 @@ def run_single_trial(
     wrist_frames = []
     action_plan = []
     plan_i = 0
+    chunk_id = 0
     reset_server = True
     info = None
 
@@ -237,9 +232,7 @@ def run_single_trial(
         if t < wait_steps:
             print(f"  [trial {trial_id}] warmup step {t + 1}/{wait_steps}", flush=True)
             obs, _, done, info = env.step(LIBERO_DUMMY_ACTION)
-            logger.advance_steps(1)
             t += 1
-            logger.observe_event_source(obs=obs, info=info)
             continue
 
         if not isinstance(obs, dict):
@@ -258,14 +251,16 @@ def run_single_trial(
                 "observation/wrist_image": wrist_img,
                 "observation/state": state,
                 "prompt": str(prompt_text),
+                "task_name": task_name,
+                "trial_id": int(trial_id),
+                "chunk_id": int(chunk_id),
             }
-            req = logger.build_policy_payload(base_payload=base_payload)
-            received = policy.infer(req)
+            received = policy.infer(base_payload)
             action_chunk = np.asarray(received["actions"], dtype=np.float32)
             if action_chunk.ndim != 2 or action_chunk.shape[1] != 7:
                 raise ValueError(f"Expected actions shape (T, 7), got {action_chunk.shape}")
             action_plan = action_chunk[:replan_steps].tolist()
-            logger.register_chunk(chunk_horizon=len(action_plan))
+            chunk_id += 1
             plan_i = 0
             reset_server = False
             print(
@@ -276,12 +271,9 @@ def run_single_trial(
         action = action_plan[plan_i]
         plan_i += 1
         obs, _, done, info = env.step(action)
-        logger.advance_steps(1)
         t += 1
-        logger.observe_event_source(obs=obs, info=info)
 
-    logger.finalize(success=done, final_info=info)
-    print(f"  [trial {trial_id}] finalize done, total_steps={t}, success={done}", flush=True)
+    print(f"  [trial {trial_id}] rollout done, total_steps={t}, success={done}", flush=True)
     return done, t, frames, wrist_frames
 
 
@@ -291,7 +283,6 @@ def collect_task_trials(
     prompt_text: str,
     task_name: str,
     output_dir: pathlib.Path,
-    chunk_root: pathlib.Path,
     policy: WebsocketClientPolicy,
     offscreen_env_cls,
     resolution: int,
@@ -305,7 +296,6 @@ def collect_task_trials(
     seed: int,
     placement_retries: int,
     save_wrist: bool,
-    ood_type: str,
 ) -> Tuple[int, int, int]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -336,14 +326,12 @@ def collect_task_trials(
                 prompt_text=prompt_text,
                 task_name=task_name,
                 trial_id=trial_id,
-                ood_type=ood_type,
                 policy=policy,
                 resize=resize,
                 wait_steps=wait_steps,
                 max_steps=max_steps,
                 replan_steps=replan_steps,
                 save_wrist=save_wrist,
-                chunk_root=chunk_root,
             )
         finally:
             print(f"  [trial {trial_id}] closing env", flush=True)
@@ -390,26 +378,67 @@ def iter_bddl_files_from_tasks_info(tasks_info: pathlib.Path, input_dir: pathlib
         if rel_path.is_absolute():
             yield rel_path.resolve()
             continue
-        if rel_path.parts and rel_path.parts[0] == input_dir.name:
-            rel_path = pathlib.Path(*rel_path.parts[1:])
-        candidate = (input_dir / rel_path).resolve()
-        if candidate.exists():
-            yield candidate
-            continue
-        yield (input_dir / rel_path.name).resolve()
+
+        candidates = []
+        rel_variants = [rel_path]
+        parts = rel_path.parts
+        if parts and parts[0] == input_dir.name:
+            rel_variants.append(pathlib.Path(*parts[1:]))
+        if len(parts) >= 3 and parts[0] == "libero" and parts[1] == "bddl_files":
+            rel_variants.append(pathlib.Path(*parts[2:]))
+
+        for variant in rel_variants:
+            candidates.append((input_dir / variant).resolve())
+            candidates.append((input_dir / variant.name).resolve())
+
+        for candidate in candidates:
+            if candidate.exists():
+                yield candidate
+                break
+        else:
+            candidate_lines = "\n".join(f"  - {path}" for path in candidates)
+            raise FileNotFoundError(
+                f"Could not resolve BDDL path from tasks_info line: {line}\n"
+                f"tasks_info: {tasks_info}\n"
+                f"input_dir: {input_dir}\n"
+                f"Tried:\n{candidate_lines}"
+            )
 
 
-def task_has_existing_results(*, output_dir: pathlib.Path, chunk_root: pathlib.Path, task_name: str) -> bool:
-    task_chunk_dir = chunk_root / task_name
+def resolve_tasks_info_path(tasks_info: Optional[pathlib.Path], input_dir: pathlib.Path) -> Optional[pathlib.Path]:
+    if tasks_info is None:
+        default_path = input_dir / "tasks_info.txt"
+        return default_path if default_path.exists() else None
 
+    requested = tasks_info.expanduser().resolve()
+    if requested.exists():
+        return requested
+
+    if tasks_info.name != "tasks_info.txt":
+        raise FileNotFoundError(f"tasks_info file does not exist: {requested}")
+
+    candidates = sorted(input_dir.rglob("tasks_info.txt"))
+    if len(candidates) == 1:
+        print(f"tasks_info file not found at {requested}; using {candidates[0].resolve()}", flush=True)
+        return candidates[0].resolve()
+
+    if not candidates:
+        raise FileNotFoundError(
+            f"tasks_info file does not exist: {requested}\n"
+            f"No tasks_info.txt files were found under input_dir: {input_dir}"
+        )
+
+    candidate_lines = "\n".join(f"  - {path.resolve()}" for path in candidates)
+    raise FileNotFoundError(
+        f"tasks_info file does not exist: {requested}\n"
+        "Multiple tasks_info.txt files were found under input_dir. Please pass the exact one:\n"
+        f"{candidate_lines}"
+    )
+
+
+def task_has_existing_results(*, output_dir: pathlib.Path) -> bool:
     if output_dir.exists():
         if any(output_dir.glob("trial*_success.mp4")) or any(output_dir.glob("trial*_failure.mp4")):
-            return True
-
-    if task_chunk_dir.exists():
-        if any(task_chunk_dir.glob("trial_*")):
-            return True
-        if any(task_chunk_dir.rglob("rollouts_finalize.jsonl")):
             return True
 
     return False
@@ -440,7 +469,6 @@ def main():
         help="Retry environment construction with different seeds when BDDL placement sampling fails.",
     )
     parser.add_argument("--output_root", type=pathlib.Path, default=DEFAULT_OUTPUT_ROOT)
-    parser.add_argument("--chunk_root", type=pathlib.Path, default=DEFAULT_CHUNK_ROOT)
     parser.add_argument(
         "--skip_existing",
         dest="skip_existing",
@@ -465,10 +493,9 @@ def main():
     offscreen_env_cls = import_libero_modules(args.libero_root)
     policy = WebsocketClientPolicy(host=args.host, port=args.port)
 
-    if args.tasks_info is not None:
-        tasks_info = args.tasks_info.expanduser().resolve()
-        if not tasks_info.exists():
-            raise FileNotFoundError(f"tasks_info file does not exist: {tasks_info}")
+    tasks_info = resolve_tasks_info_path(args.tasks_info, input_dir)
+    if tasks_info is not None:
+        print(f"Using tasks_info: {tasks_info}", flush=True)
         bddl_files = list(iter_bddl_files_from_tasks_info(tasks_info, input_dir))
     else:
         bddl_files = list(iter_bddl_files(input_dir))
@@ -493,11 +520,7 @@ def main():
         output_dir = args.output_root / suite_name / rel_parent / task_name
         print(f"Output path: {output_dir}")
 
-        if args.skip_existing and task_has_existing_results(
-            output_dir=output_dir,
-            chunk_root=args.chunk_root,
-            task_name=task_name,
-        ):
+        if args.skip_existing and task_has_existing_results(output_dir=output_dir):
             print(f"Skipping task {task_name}: existing rollout outputs detected")
             continue
 
@@ -506,7 +529,6 @@ def main():
             prompt_text=prompt_text,
             task_name=task_name,
             output_dir=output_dir,
-            chunk_root=args.chunk_root,
             policy=policy,
             offscreen_env_cls=offscreen_env_cls,
             resolution=args.resolution,
@@ -520,7 +542,6 @@ def main():
             seed=args.seed,
             placement_retries=args.placement_retries,
             save_wrist=args.save_wrist,
-            ood_type=suite_name,
         )
         print(
             f"Finished task {task_name}: success={successes}/{args.target_successes}, "

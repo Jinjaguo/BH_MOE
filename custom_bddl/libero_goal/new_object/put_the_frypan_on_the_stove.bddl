@@ -1,6 +1,6 @@
 (define (problem LIBERO_Tabletop_Manipulation)
   (:domain robosuite)
-  (:language Put the bowl on the top of the drawer)
+  (:language Put the frypan on the stove)
     (:regions
       (plate_region
           (:target main_table)
@@ -20,6 +20,13 @@
           (:target main_table)
           (:ranges (
               (-0.21000000000000002 -0.060000000000000005 -0.19 -0.04)
+            )
+          )
+      )
+      (frypan_region
+          (:target main_table)
+          (:ranges (
+              (0.08000000000000002 0.22 0.10 0.24)
             )
           )
       )
@@ -104,11 +111,12 @@
     cream_cheese_1 - cream_cheese
     wine_bottle_1 - wine_bottle
     plate_1 - plate
+    chefmate_8_frypan_1 - chefmate_8_frypan
   )
 
   (:obj_of_interest
-    akita_black_bowl_1
-    wooden_cabinet_1_top_side
+    chefmate_8_frypan_1
+    flat_stove_1_cook_region
   )
 
   (:init
@@ -119,10 +127,11 @@
     (On wooden_cabinet_1 main_table_cabinet_region)
     (On flat_stove_1 main_table_stove_region)
     (On wine_rack_1 main_table_wine_rack_region)
+    (On chefmate_8_frypan_1 main_table_frypan_region)
   )
 
   (:goal
-    (And (On akita_black_bowl_1 wooden_cabinet_1_top_side))
+    (And (On chefmate_8_frypan_1 flat_stove_1_cook_region))
   )
 
 )

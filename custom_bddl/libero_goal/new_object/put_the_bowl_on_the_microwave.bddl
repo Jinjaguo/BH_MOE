@@ -1,6 +1,6 @@
 (define (problem LIBERO_Tabletop_Manipulation)
   (:domain robosuite)
-  (:language Open the top layer of the drawer and put the bowl inside)
+  (:language Put the bowl on the microwave)
     (:regions
       (plate_region
           (:target main_table)
@@ -55,6 +55,13 @@
             )
           )
       )
+      (microwave_region
+          (:target main_table)
+          (:ranges (
+              (0.14 0.24 0.16 0.26)
+            )
+          )
+      )
       (wine_rack_region
           (:target main_table)
           (:ranges (
@@ -90,6 +97,12 @@
       (top_region
           (:target wine_rack_1)
       )
+      (top_side
+          (:target microwave_1)
+      )
+      (heating_region
+          (:target microwave_1)
+      )
     )
 
   (:fixtures
@@ -97,6 +110,7 @@
     wooden_cabinet_1 - wooden_cabinet
     flat_stove_1 - flat_stove
     wine_rack_1 - wine_rack
+    microwave_1 - microwave
   )
 
   (:objects
@@ -108,7 +122,7 @@
 
   (:obj_of_interest
     akita_black_bowl_1
-    wooden_cabinet_1_top_region
+    microwave_1_top_side
   )
 
   (:init
@@ -119,10 +133,11 @@
     (On wooden_cabinet_1 main_table_cabinet_region)
     (On flat_stove_1 main_table_stove_region)
     (On wine_rack_1 main_table_wine_rack_region)
+    (On microwave_1 main_table_microwave_region)
   )
 
   (:goal
-    (And (In akita_black_bowl_1 wooden_cabinet_1_top_region))
+    (And (On akita_black_bowl_1 microwave_1_top_side))
   )
 
 )

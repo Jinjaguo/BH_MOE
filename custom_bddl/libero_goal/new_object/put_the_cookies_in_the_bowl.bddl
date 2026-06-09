@@ -1,6 +1,6 @@
 (define (problem LIBERO_Tabletop_Manipulation)
   (:domain robosuite)
-  (:language Put the wine bottle on the rack)
+  (:language Put the cookies on the bowl)
     (:regions
       (plate_region
           (:target main_table)
@@ -27,6 +27,13 @@
           (:target main_table)
           (:ranges (
               (-0.060000000000000005 0.12000000000000001 -0.04 0.14)
+            )
+          )
+      )
+      (cookies_region
+          (:target main_table)
+          (:ranges (
+              (0.060000000000000005 0.16000000000000001 0.08 0.18)
             )
           )
       )
@@ -104,11 +111,12 @@
     cream_cheese_1 - cream_cheese
     wine_bottle_1 - wine_bottle
     plate_1 - plate
+    cookies_1 - cookies
   )
 
   (:obj_of_interest
-    wine_bottle_1
-    wine_rack_1_top_region
+    cookies_1
+    akita_black_bowl_1
   )
 
   (:init
@@ -119,10 +127,11 @@
     (On wooden_cabinet_1 main_table_cabinet_region)
     (On flat_stove_1 main_table_stove_region)
     (On wine_rack_1 main_table_wine_rack_region)
+    (On cookies_1 main_table_cookies_region)
   )
 
   (:goal
-    (And (On wine_bottle_1 wine_rack_1_top_region))
+    (And (On cookies_1 akita_black_bowl_1))
   )
 
 )

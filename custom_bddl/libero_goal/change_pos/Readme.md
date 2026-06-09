@@ -1,3 +1,5 @@
+This group of tasks remain the objects appeared in the training dataset but change the position of the objects
+
 Task:
     put_the_wine_bottle_on_top_of_the_cabinet:
         Flip the position of the wine bottle and the cabinet. The orientation of the cabinet is not changed

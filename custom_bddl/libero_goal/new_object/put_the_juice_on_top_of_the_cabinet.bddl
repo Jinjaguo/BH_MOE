@@ -1,6 +1,6 @@
 (define (problem LIBERO_Tabletop_Manipulation)
   (:domain robosuite)
-  (:language Put the bowl on the stove)
+  (:language Put the juice on the top of the drawer)
     (:regions
       (plate_region
           (:target main_table)
@@ -20,6 +20,13 @@
           (:target main_table)
           (:ranges (
               (-0.21000000000000002 -0.060000000000000005 -0.19 -0.04)
+            )
+          )
+      )
+      (juice_region
+          (:target main_table)
+          (:ranges (
+              (-0.0600000000000002 0.180000000000000005 -0.04 0.20)
             )
           )
       )
@@ -104,11 +111,12 @@
     cream_cheese_1 - cream_cheese
     wine_bottle_1 - wine_bottle
     plate_1 - plate
+    orange_juice_1 - orange_juice
   )
 
   (:obj_of_interest
-    akita_black_bowl_1
-    flat_stove_1_cook_region
+    orange_juice_1
+    wooden_cabinet_1_top_side
   )
 
   (:init
@@ -119,10 +127,11 @@
     (On wooden_cabinet_1 main_table_cabinet_region)
     (On flat_stove_1 main_table_stove_region)
     (On wine_rack_1 main_table_wine_rack_region)
+    (On orange_juice_1 main_table_juice_region)
   )
 
   (:goal
-    (And (On akita_black_bowl_1 flat_stove_1_cook_region))
+    (And (On orange_juice_1 wooden_cabinet_1_top_side))
   )
 
 )
