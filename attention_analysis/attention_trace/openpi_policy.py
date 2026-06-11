@@ -46,6 +46,7 @@ import random
 import types
 from typing import Any, Literal
 
+import imageio.v2 as imageio
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -91,12 +92,230 @@ def _flatten_for_sink(value_states: torch.Tensor) -> torch.Tensor:
     return value_states.transpose(1, 2).contiguous().flatten(start_dim=2)
 
 
+def _image_tensor_to_uint8_hwc(image: Any) -> np.ndarray:
+    array = _to_numpy(image)
+    if array.ndim == 4:
+        array = array[0]
+    if array.ndim != 3:
+        raise ValueError(f"Expected image with shape [H,W,C] or [C,H,W], got {array.shape}")
+    if array.shape[0] in {1, 3, 4} and array.shape[-1] not in {1, 3, 4}:
+        array = np.moveaxis(array, 0, -1)
+    array = array[..., :3]
+    if array.dtype != np.uint8:
+        array = array.astype(np.float32)
+        min_value = float(np.nanmin(array))
+        max_value = float(np.nanmax(array))
+        if min_value < -0.01:
+            array = (array + 1.0) / 2.0
+        elif max_value > 1.5:
+            array = array / 255.0
+        array = np.clip(array, 0.0, 1.0)
+        array = (array * 255.0).round().astype(np.uint8)
+    return np.ascontiguousarray(array)
+
+
+def _save_input_images(
+    images: Any,
+    camera_names: tuple[str, ...],
+    run_dir: pathlib.Path,
+) -> dict[str, dict[str, Any]]:
+    image_dir = run_dir / "input_images"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    metadata: dict[str, dict[str, Any]] = {}
+    for idx, image in enumerate(images):
+        camera = camera_names[idx] if idx < len(camera_names) else f"camera_{idx}"
+        array = _image_tensor_to_uint8_hwc(image)
+        filename = f"{camera}.png"
+        imageio.imwrite(image_dir / filename, array)
+        metadata[camera] = {
+            "camera": camera,
+            "path": str(pathlib.Path("input_images") / filename),
+            "height": int(array.shape[0]),
+            "width": int(array.shape[1]),
+            "channels": int(array.shape[2]),
+        }
+    (image_dir / "image_manifest.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    return metadata
+
+
 @dataclasses.dataclass
 class _PrefixInfo:
     image_token_counts: dict[str, int] = dataclasses.field(default_factory=dict)
+    image_metadata: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)
     text_token_ids: list[int] = dataclasses.field(default_factory=list)
+    text_token_strings: list[str | None] = dataclasses.field(default_factory=list)
+    text_token_texts: list[str | None] = dataclasses.field(default_factory=list)
+    text_token_types: list[str] = dataclasses.field(default_factory=list)
+    text_token_special_roles: list[str | None] = dataclasses.field(default_factory=list)
     text_mask: list[bool] = dataclasses.field(default_factory=list)
     prefix_len: int = 0
+
+
+def _iter_transforms(transform: Any):
+    if transform is None:
+        return
+    children = getattr(transform, "transforms", None)
+    if children is not None:
+        for child in children:
+            yield from _iter_transforms(child)
+        return
+    yield transform
+
+
+def _find_text_tokenizer(policy: Any) -> Any | None:
+    for transform in _iter_transforms(getattr(policy, "_input_transform", None)):
+        tokenizer = getattr(transform, "tokenizer", None)
+        if tokenizer is not None:
+            return tokenizer
+    return None
+
+
+def _token_piece(tokenizer: Any | None, token_id: int) -> str | None:
+    if tokenizer is None:
+        return None
+    inner = getattr(tokenizer, "_tokenizer", None)
+    if inner is not None:
+        return _token_piece(inner, token_id)
+    inner = getattr(tokenizer, "_paligemma_tokenizer", None)
+    if inner is not None:
+        return _token_piece(inner, token_id)
+    for method_name in ("id_to_piece", "IdToPiece"):
+        method = getattr(tokenizer, method_name, None)
+        if method is not None:
+            try:
+                return str(method(int(token_id)))
+            except Exception:
+                pass
+    method = getattr(tokenizer, "convert_ids_to_tokens", None)
+    if method is not None:
+        try:
+            return str(method([int(token_id)])[0])
+        except Exception:
+            pass
+    return _token_text(tokenizer, token_id)
+
+
+def _token_text(tokenizer: Any | None, token_id: int) -> str | None:
+    if tokenizer is None:
+        return None
+    inner = getattr(tokenizer, "_tokenizer", None)
+    if inner is not None:
+        return _token_text(inner, token_id)
+    inner = getattr(tokenizer, "_paligemma_tokenizer", None)
+    if inner is not None:
+        return _token_text(inner, token_id)
+    method = getattr(tokenizer, "decode", None)
+    if method is not None:
+        try:
+            return str(method([int(token_id)]))
+        except Exception:
+            try:
+                return str(method(int(token_id)))
+            except Exception:
+                pass
+    return None
+
+
+def _tokenizer_int_attr(tokenizer: Any | None, name: str) -> int | None:
+    if tokenizer is None:
+        return None
+    inner = getattr(tokenizer, "_tokenizer", None)
+    if inner is not None:
+        return _tokenizer_int_attr(inner, name)
+    inner = getattr(tokenizer, "_paligemma_tokenizer", None)
+    if inner is not None:
+        return _tokenizer_int_attr(inner, name)
+    value = getattr(tokenizer, name, None)
+    if value is None:
+        return None
+    try:
+        return int(value() if callable(value) else value)
+    except Exception:
+        return None
+
+
+def _special_token_role(tokenizer: Any | None, token_id: int) -> str | None:
+    special_methods = (
+        ("bos", "bos_id"),
+        ("eos", "eos_id"),
+        ("pad", "pad_id"),
+        ("unk", "unk_id"),
+    )
+    for role, attr_name in special_methods:
+        special_id = _tokenizer_int_attr(tokenizer, attr_name)
+        if special_id is not None and special_id >= 0 and int(token_id) == special_id:
+            return role
+
+    piece = (_token_piece(tokenizer, token_id) or "").strip().lower()
+    text = (_token_text(tokenizer, token_id) or "").strip().lower()
+    marker = piece or text
+    if marker in {"<s>", "<bos>", "[bos]", "<start_of_text>"}:
+        return "bos"
+    if marker in {"</s>", "<eos>", "[eos]", "<end_of_text>"}:
+        return "eos"
+    if marker in {"<pad>", "[pad]", "<padding>"}:
+        return "pad"
+    if marker in {"<unk>", "[unk]"}:
+        return "unk"
+    return None
+
+
+def _normalized_token_text(token_piece: str | None, token_text: str | None) -> str:
+    value = token_text if token_text is not None else token_piece
+    value = (value or "").replace("▁", " ").replace("Ġ", " ")
+    return value.strip().lower()
+
+
+def _is_template_delimiter(value: str) -> bool:
+    return value in {"", ":", ",", ";", "\\n", "\n", "action:", "state:", "task:"}
+
+
+def _classify_text_tokens(
+    token_ids: list[int],
+    token_pieces: list[str | None],
+    token_texts: list[str | None],
+    tokenizer: Any | None,
+) -> tuple[list[str], list[str | None]]:
+    """Classify prefix language tokens as tokenizer/template special, prompt, or state."""
+
+    special_roles = [_special_token_role(tokenizer, token_id) for token_id in token_ids]
+    normalized = [_normalized_token_text(piece, text) for piece, text in zip(token_pieces, token_texts)]
+
+    def find_marker(marker: str) -> int | None:
+        for idx, value in enumerate(normalized):
+            if value == marker:
+                return idx
+        return None
+
+    task_pos = find_marker("task")
+    state_pos = find_marker("state")
+    action_pos = find_marker("action")
+
+    token_types: list[str] = []
+    updated_special_roles: list[str | None] = []
+    for idx, value in enumerate(normalized):
+        special_role = special_roles[idx]
+        token_type = "special"
+
+        if special_role is not None:
+            token_type = "special"
+        elif idx in {task_pos, state_pos, action_pos} or _is_template_delimiter(value):
+            special_role = "template"
+            token_type = "special"
+        elif state_pos is not None and idx > state_pos and (action_pos is None or idx < action_pos):
+            token_type = "state"
+        elif task_pos is not None and idx > task_pos and (state_pos is None or idx < state_pos):
+            token_type = "prompt"
+        elif state_pos is None and action_pos is None:
+            token_type = "prompt"
+        else:
+            special_role = "template"
+            token_type = "special"
+
+        token_types.append(token_type)
+        updated_special_roles.append(special_role)
+
+    return token_types, updated_special_roles
 
 
 class _OpenPIAttentionCollector:
@@ -114,6 +333,7 @@ class _OpenPIAttentionCollector:
         sink_strategy: SinkStrategy,
         p: float,
         camera_names: tuple[str, ...],
+        text_tokenizer: Any | None,
         disable_torch_compile: bool,
     ) -> None:
         self._pi_model = pi_model
@@ -125,6 +345,7 @@ class _OpenPIAttentionCollector:
         self._sink_strategy = sink_strategy
         self._p = p
         self._camera_names = camera_names
+        self._text_tokenizer = text_tokenizer
         self._disable_torch_compile = disable_torch_compile
 
         self._active = False
@@ -175,9 +396,28 @@ class _OpenPIAttentionCollector:
             name = self._camera_names[idx] if idx < len(self._camera_names) else f"camera_{idx}"
             counts[name] = base_count + (1 if idx < remainder else 0)
 
+        image_metadata = _save_input_images(
+            images,
+            self._camera_names,
+            pathlib.Path(self._run_context["run_dir"]),
+        )
+        token_ids = [int(v) for v in lang_tokens[0].detach().cpu().tolist()]
+        token_pieces = [_token_piece(self._text_tokenizer, token_id) for token_id in token_ids]
+        token_texts = [_token_text(self._text_tokenizer, token_id) for token_id in token_ids]
+        token_types, special_roles = _classify_text_tokens(
+            token_ids,
+            token_pieces,
+            token_texts,
+            self._text_tokenizer,
+        )
         self._prefix_info = _PrefixInfo(
             image_token_counts=counts,
-            text_token_ids=[int(v) for v in lang_tokens[0].detach().cpu().tolist()],
+            image_metadata=image_metadata,
+            text_token_ids=token_ids,
+            text_token_strings=token_pieces,
+            text_token_texts=token_texts,
+            text_token_types=token_types,
+            text_token_special_roles=special_roles,
             text_mask=[bool(v) for v in lang_masks[0].detach().cpu().tolist()],
             prefix_len=prefix_len,
         )
@@ -240,7 +480,7 @@ class _OpenPIAttentionCollector:
                 layer_idx=layer_idx,
                 module_name=f"{phase}.layers.{layer_idx}.self_attn",
                 attn_probs=attn_for_model,
-                hidden_states=value_proxy,
+                hidden_states=value_states,
                 inference_phase=phase,
                 query_indices=list(range(attn_for_model.shape[-2])),
                 query_group=query_group,
@@ -282,15 +522,48 @@ class _OpenPIAttentionCollector:
             "continuous_action",
         )
 
-    def _detect_sinks(self, value_proxy: torch.Tensor) -> dict[str, list[int]]:
+    def _detect_sinks(self, value_proxy: torch.Tensor) -> dict[str, Any]:
         if self._sink_strategy == "none":
-            return {"all": [], "visual": [], "text": [], "proprio": [], "action": [], "spike_dims": []}
+            return {
+                "all": [],
+                "visual": [],
+                "text": [],
+                "prompt": [],
+                "state": [],
+                "special": [],
+                "proprio": [],
+                "action": [],
+                "spike_dims": [],
+                "sink_token_spike_dims": {},
+            }
         if self._tracer is None:
-            return {"all": [], "visual": [], "text": [], "proprio": [], "action": [], "spike_dims": []}
+            return {
+                "all": [],
+                "visual": [],
+                "text": [],
+                "prompt": [],
+                "state": [],
+                "special": [],
+                "proprio": [],
+                "action": [],
+                "spike_dims": [],
+                "sink_token_spike_dims": {},
+            }
         try:
             return detect_sink_tokens(value_proxy, self._tracer.token_spans)
         except ValueError:
-            return {"all": [], "visual": [], "text": [], "proprio": [], "action": [], "spike_dims": []}
+            return {
+                "all": [],
+                "visual": [],
+                "text": [],
+                "prompt": [],
+                "state": [],
+                "special": [],
+                "proprio": [],
+                "action": [],
+                "spike_dims": [],
+                "sink_token_spike_dims": {},
+            }
 
     def _apply_mode(self, attn_weights: torch.Tensor, sink_tokens: dict[str, list[int]]) -> torch.Tensor:
         if self._tracer is None:
@@ -389,17 +662,34 @@ class _OpenPIAttentionCollector:
 
     def _build_token_map(self) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         token_map: list[dict[str, Any]] = []
-        token_spans: dict[str, Any] = {"image": {}, "text": [], "proprio": [], "continuous_action": [], "fast_action": []}
+        token_spans: dict[str, Any] = {
+            "image": {},
+            "text": [],
+            "prompt": [],
+            "state": [],
+            "special": [],
+            "proprio": [],
+            "continuous_action": [],
+            "fast_action": [],
+        }
         index = 0
-        patch_size = 16
 
         for camera, count in self._prefix_info.image_token_counts.items():
             cols = int(math.sqrt(count)) if int(math.sqrt(count)) ** 2 == count else int(math.ceil(math.sqrt(count)))
             rows = int(math.ceil(count / max(cols, 1)))
+            image_info = self._prefix_info.image_metadata.get(camera, {})
+            image_height = int(image_info.get("height", rows))
+            image_width = int(image_info.get("width", cols))
+            patch_width = float(image_width) / max(cols, 1)
+            patch_height = float(image_height) / max(rows, 1)
             span = []
             for patch_id in range(count):
                 patch_row = patch_id // cols
                 patch_col = patch_id % cols
+                x0 = patch_col * patch_width
+                y0 = patch_row * patch_height
+                x1 = min(image_width, (patch_col + 1) * patch_width)
+                y1 = min(image_height, (patch_row + 1) * patch_height)
                 token_map.append(
                     {
                         "index": index,
@@ -410,8 +700,14 @@ class _OpenPIAttentionCollector:
                         "patch_id": patch_id,
                         "patch_grid_rows": rows,
                         "patch_grid_cols": cols,
-                        "center_x": float((patch_col + 0.5) * patch_size),
-                        "center_y": float((patch_row + 0.5) * patch_size),
+                        "center_x": float((x0 + x1) / 2.0),
+                        "center_y": float((y0 + y1) / 2.0),
+                        "patch_box_xyxy": [float(x0), float(y0), float(x1), float(y1)],
+                        "patch_width": float(patch_width),
+                        "patch_height": float(patch_height),
+                        "raw_image_path": image_info.get("path"),
+                        "raw_image_height": image_height,
+                        "raw_image_width": image_width,
                         "object_label": None,
                         "raw_span": None,
                     }
@@ -422,19 +718,42 @@ class _OpenPIAttentionCollector:
 
         for text_pos, token_id in enumerate(self._prefix_info.text_token_ids):
             is_valid_text = text_pos >= len(self._prefix_info.text_mask) or self._prefix_info.text_mask[text_pos]
+            token_str = self._prefix_info.text_token_strings[text_pos] if text_pos < len(self._prefix_info.text_token_strings) else None
+            token_text = self._prefix_info.text_token_texts[text_pos] if text_pos < len(self._prefix_info.text_token_texts) else None
+            special_role = (
+                self._prefix_info.text_token_special_roles[text_pos]
+                if text_pos < len(self._prefix_info.text_token_special_roles)
+                else None
+            )
+            recorded_type = (
+                self._prefix_info.text_token_types[text_pos]
+                if text_pos < len(self._prefix_info.text_token_types)
+                else "prompt"
+            )
+            token_type = "text_padding"
+            if is_valid_text:
+                token_type = recorded_type
             token_map.append(
                 {
                     "index": index,
-                    "type": "text" if is_valid_text else "text_padding",
+                    "type": token_type,
                     "token_position": text_pos,
                     "token_id": int(token_id),
-                    "token_str": None,
+                    "token_str": token_str,
+                    "token_text": token_text,
+                    "special_role": special_role,
                     "char_start": None,
                     "char_end": None,
                     "valid": is_valid_text,
                 }
             )
-            if is_valid_text:
+            if is_valid_text and token_type == "special":
+                token_spans["special"].append(index)
+            elif is_valid_text and token_type == "state":
+                token_spans["state"].append(index)
+                token_spans["text"].append(index)
+            elif is_valid_text:
+                token_spans["prompt"].append(index)
                 token_spans["text"].append(index)
             index += 1
 
@@ -493,6 +812,7 @@ class AttentionTracingPolicy:
         if pi_model is None or not hasattr(pi_model, "paligemma_with_expert"):
             raise TypeError("Wrapped policy does not expose the expected PI0 PyTorch model structure.")
 
+        text_tokenizer = _find_text_tokenizer(policy)
         self._collector = _OpenPIAttentionCollector(
             pi_model,
             record_root=self._record_root,
@@ -503,6 +823,7 @@ class AttentionTracingPolicy:
             sink_strategy=sink_strategy,
             p=p,
             camera_names=camera_names,
+            text_tokenizer=text_tokenizer,
             disable_torch_compile=disable_torch_compile,
         )
         if disable_torch_compile and hasattr(policy, "_sample_actions"):

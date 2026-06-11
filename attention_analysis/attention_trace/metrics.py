@@ -145,13 +145,13 @@ def compute_attention_summary(
 
     image_indices = flatten_indices(token_spans.get("image"))
     text_indices = flatten_indices(token_spans.get("text"))
+    prompt_indices = flatten_indices(token_spans.get("prompt"))
+    state_indices = flatten_indices(token_spans.get("state"))
+    special_indices = flatten_indices(token_spans.get("special"))
     proprio_indices = flatten_indices(token_spans.get("proprio"))
     action_indices = flatten_indices(token_spans.get("continuous_action")) | flatten_indices(token_spans.get("fast_action"))
     sink_tokens = sink_tokens or {}
-    text_sink_indices = flatten_indices(sink_tokens.get("text"))
-    visual_sink_indices = flatten_indices(sink_tokens.get("visual"))
-    non_sink_text_indices = text_indices - text_sink_indices
-    non_sink_visual_indices = image_indices - visual_sink_indices
+    sink_tokens_by_head = sink_tokens.get("by_head", {}) if isinstance(sink_tokens, dict) else {}
 
     target_word_indices = set(find_subword_indices(target_object, token_map)) if target_object else set()
     target_patch_indices = object_patch_indices(token_map, target_object) if target_object else set()
@@ -166,6 +166,14 @@ def compute_attention_summary(
     rows: list[dict[str, Any]] = []
     mean_attn = attn.mean(axis=0)
     for head_idx in range(num_heads):
+        head_sink_tokens = sink_tokens_by_head.get(str(head_idx), sink_tokens)
+        text_sink_indices = flatten_indices(head_sink_tokens.get("text"))
+        prompt_sink_indices = flatten_indices(head_sink_tokens.get("prompt"))
+        state_sink_indices = flatten_indices(head_sink_tokens.get("state"))
+        special_sink_indices = flatten_indices(head_sink_tokens.get("special"))
+        visual_sink_indices = flatten_indices(head_sink_tokens.get("visual"))
+        non_sink_text_indices = text_indices - text_sink_indices
+        non_sink_visual_indices = image_indices - visual_sink_indices
         for query_idx in queries:
             row = mean_attn[head_idx, query_idx]
             top1_key = int(row.argmax()) if row.size else -1
@@ -186,7 +194,13 @@ def compute_attention_summary(
                     "query_len": int(query_len),
                     "key_len": int(key_len),
                     "text_mass": _mass(row, text_indices),
+                    "prompt_mass": _mass(row, prompt_indices),
+                    "state_mass": _mass(row, state_indices),
+                    "special_mass": _mass(row, special_indices),
                     "text_sink_mass": _mass(row, text_sink_indices),
+                    "prompt_sink_mass": _mass(row, prompt_sink_indices),
+                    "state_sink_mass": _mass(row, state_sink_indices),
+                    "special_sink_mass": _mass(row, special_sink_indices),
                     "non_sink_text_mass": _mass(row, non_sink_text_indices),
                     "object_word_mass": _mass(row, target_word_indices),
                     "target_object_word_mass": _mass(row, target_word_indices),
@@ -260,9 +274,15 @@ def attention_topk(
                             "key_token_index": int(key_lookup[int(idx)].get("index", idx)),
                             "key_type": key_lookup[int(idx)].get("type", "unknown"),
                             "token_str": key_lookup[int(idx)].get("token_str"),
+                            "token_text": key_lookup[int(idx)].get("token_text"),
+                            "special_role": key_lookup[int(idx)].get("special_role"),
                             "camera": key_lookup[int(idx)].get("camera"),
                             "patch_row": key_lookup[int(idx)].get("patch_row"),
                             "patch_col": key_lookup[int(idx)].get("patch_col"),
+                            "patch_box_xyxy": key_lookup[int(idx)].get("patch_box_xyxy"),
+                            "raw_image_path": key_lookup[int(idx)].get("raw_image_path"),
+                            "raw_image_height": key_lookup[int(idx)].get("raw_image_height"),
+                            "raw_image_width": key_lookup[int(idx)].get("raw_image_width"),
                             "object_label": key_lookup[int(idx)].get("object_label"),
                             "attention": float(row[int(idx)]),
                         }

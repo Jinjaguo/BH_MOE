@@ -20,7 +20,7 @@ sinks = detect_sink_tokens(hidden_states, token_spans)
 Outputs
 -------
 Returns a dictionary with sink-token indices grouped as all, visual, text,
-proprio, and action. Callers usually save it as sink_tokens.json inside one
+prompt, state, special, proprio, and action. Callers usually save it as sink_tokens.json inside one
 run directory, for example:
 outputs/attention_trace/scene_id=0/seed=0/prompt=pick_up_cup/baseline/
 """
@@ -64,8 +64,10 @@ def detect_sink_tokens(
     gamma: float = 3.0,
     tau: float = 20.0,
     top_k_dims: int = 5,
+    max_spike_dims: int = 20,
+    max_token_spike_dims: int = 20,
     eps: float = 1e-8,
-) -> dict[str, list[int]]:
+) -> dict[str, Any]:
     """Detect sink tokens using hidden-state spike dimensions."""
 
     hidden = _to_numpy(hidden_states)
@@ -76,17 +78,33 @@ def detect_sink_tokens(
 
     abs_hidden = np.abs(hidden)
     spike_ratio = abs_hidden.max(axis=0) / (abs_hidden.mean(axis=0) + eps)
-    spike_dims = np.flatnonzero(spike_ratio > gamma)
-    if spike_dims.size == 0 and top_k_dims > 0:
-        spike_dims = np.argsort(spike_ratio)[-top_k_dims:]
+    candidate_spike_dims = np.flatnonzero(spike_ratio > gamma)
+    if candidate_spike_dims.size == 0 and top_k_dims > 0:
+        candidate_spike_dims = np.argsort(spike_ratio)[-top_k_dims:]
 
-    if spike_dims.size == 0:
+    if candidate_spike_dims.size == 0:
         sink_indices: set[int] = set()
     else:
-        sink_indices = set(np.flatnonzero(abs_hidden[:, spike_dims].max(axis=1) > tau).astype(int).tolist())
+        sink_indices = set(np.flatnonzero(abs_hidden[:, candidate_spike_dims].max(axis=1) > tau).astype(int).tolist())
+
+    spike_dims = candidate_spike_dims
+    if max_spike_dims > 0 and spike_dims.size > max_spike_dims:
+        order = np.argsort(spike_ratio[spike_dims])[::-1]
+        spike_dims = spike_dims[order[:max_spike_dims]]
+
+    sink_token_spike_dims: dict[str, list[int]] = {}
+    for token_idx in sorted(sink_indices):
+        token_dims = candidate_spike_dims[abs_hidden[token_idx, candidate_spike_dims] > tau]
+        if max_token_spike_dims > 0 and token_dims.size > max_token_spike_dims:
+            order = np.argsort(abs_hidden[token_idx, token_dims])[::-1]
+            token_dims = token_dims[order[:max_token_spike_dims]]
+        sink_token_spike_dims[str(int(token_idx))] = sorted(int(d) for d in token_dims.tolist())
 
     visual_indices = _flatten_indices(token_spans.get("image"))
     text_indices = _flatten_indices(token_spans.get("text"))
+    prompt_indices = _flatten_indices(token_spans.get("prompt"))
+    state_indices = _flatten_indices(token_spans.get("state"))
+    special_indices = _flatten_indices(token_spans.get("special"))
     proprio_indices = _flatten_indices(token_spans.get("proprio"))
     action_indices = _flatten_indices(token_spans.get("continuous_action")) | _flatten_indices(
         token_spans.get("fast_action")
@@ -96,7 +114,11 @@ def detect_sink_tokens(
         "all": sorted(sink_indices),
         "visual": sorted(sink_indices & visual_indices),
         "text": sorted(sink_indices & text_indices),
+        "prompt": sorted(sink_indices & prompt_indices),
+        "state": sorted(sink_indices & state_indices),
+        "special": sorted(sink_indices & special_indices),
         "proprio": sorted(sink_indices & proprio_indices),
         "action": sorted(sink_indices & action_indices),
         "spike_dims": sorted(int(d) for d in spike_dims.tolist()),
+        "sink_token_spike_dims": sink_token_spike_dims,
     }

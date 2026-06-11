@@ -203,23 +203,54 @@ class AttentionTracer:
         hidden = _to_cpu_tensor(hidden_states)
         if hidden is not None:
             try:
-                sinks = detect_sink_tokens(hidden, self.token_spans)
-                self.sink_tokens_by_layer[f"phase={inference_phase}/step={denoise_step}/layer={layer_idx}"] = sinks
                 hidden_np = hidden.float().numpy()
-                if hidden_np.ndim == 3:
-                    hidden_np = hidden_np[0]
-                rms = np.sqrt(np.mean(np.square(hidden_np), axis=-1))
-                self.hidden_rows.extend(
-                    {
-                        "denoise_step": int(denoise_step),
-                        "inference_phase": inference_phase,
-                        "layer": int(layer_idx),
-                        "module_name": module_name,
-                        "token_index": int(idx),
-                        "rms_norm": float(value),
-                    }
-                    for idx, value in enumerate(rms.tolist())
-                )
+                sinks_by_head: dict[str, Any] = {}
+                if hidden_np.ndim == 4:
+                    for head_idx in range(hidden_np.shape[1]):
+                        head_sinks = detect_sink_tokens(hidden_np[:, head_idx, :, :], self.token_spans)
+                        if head_sinks.get("all"):
+                            head_sinks["head"] = int(head_idx)
+                            key = f"phase={inference_phase}/step={denoise_step}/layer={layer_idx}/head={head_idx}"
+                            self.sink_tokens_by_layer[key] = head_sinks
+                            sinks_by_head[str(head_idx)] = head_sinks
+                    sinks = {"by_head": sinks_by_head}
+                else:
+                    sinks = detect_sink_tokens(hidden_np, self.token_spans)
+                    if sinks.get("all"):
+                        self.sink_tokens_by_layer[f"phase={inference_phase}/step={denoise_step}/layer={layer_idx}"] = sinks
+                if hidden_np.ndim == 4:
+                    if hidden_np.shape[0] == 1:
+                        hidden_np = hidden_np[0]
+                    rms = np.sqrt(np.mean(np.square(hidden_np), axis=-1))
+                    for head_idx, head_values in enumerate(rms.tolist()):
+                        self.hidden_rows.extend(
+                            {
+                                "denoise_step": int(denoise_step),
+                                "inference_phase": inference_phase,
+                                "layer": int(layer_idx),
+                                "head": int(head_idx),
+                                "module_name": module_name,
+                                "token_index": int(token_idx),
+                                "rms_norm": float(value),
+                            }
+                            for token_idx, value in enumerate(head_values)
+                        )
+                else:
+                    if hidden_np.ndim == 3:
+                        hidden_np = hidden_np[0]
+                    rms = np.sqrt(np.mean(np.square(hidden_np), axis=-1))
+                    self.hidden_rows.extend(
+                        {
+                            "denoise_step": int(denoise_step),
+                            "inference_phase": inference_phase,
+                            "layer": int(layer_idx),
+                            "head": -1,
+                            "module_name": module_name,
+                            "token_index": int(idx),
+                            "rms_norm": float(value),
+                        }
+                        for idx, value in enumerate(rms.tolist())
+                    )
             except ValueError:
                 sinks = {}
 
