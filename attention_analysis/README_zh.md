@@ -17,8 +17,10 @@ python /home/jinjaguo/BH_MOE/attention_analysis/scripts/start_attention_server.p
 
 Terminal B 使用 attention_analysis 里的独立 rollout 脚本。这个脚本从
 `ood_libero_rollouts.py` 移植而来，但默认输出位置已经改到
-`attention_analysis/outputs/libero_rollouts`，不会覆盖之前 `OOD_exp/...`
-下的实验结果：
+`attention_analysis/outputs/videos`，不会覆盖之前 `OOD_exp/...` 下的实验结果。
+输出路径会按实验组名分开，例如使用
+`custom_bddl/libero_goal/dif_start_end_loc/tasks_info.txt` 时，实验组名默认是
+`dif_start_end_loc`：
 
 ```bash
 conda activate libero
@@ -67,12 +69,25 @@ python attention_analysis/attention_rollouts.py \
 --max_trials
   每个任务最多跑几个 trial。attention 分析建议先用 1。
 
+--topk_max_chunks
+  只为每个 trial 的前 N 个 chunk 保存 attention_topk.jsonl。
+  例如 --topk_max_chunks 3 会保存 chunk_00000、chunk_00001、chunk_00002
+  的 top-k token；从 chunk_00003 开始不写 attention_topk.jsonl。
+  其他文件仍然每个 chunk 都保存，包括 attention_summary.parquet、
+  hidden_state_norms.parquet、sink_tokens.json、action_outputs.npz。
+  如果不传这个参数，则所有 chunk 都保存 top-k token。
+
 --seed
   LIBERO 环境初始 seed。不同 trial 会使用 seed + trial_id。
 
+--experiment_name
+  可选实验组名。默认从 --tasks_info 所在目录名推断；
+  例如 .../dif_start_end_loc/tasks_info.txt 会保存到 dif_start_end_loc。
+  如果省略 --tasks_info，则默认使用 --input_dir 的目录名。
+
 --output_root
   只保存 rollout video 的目录，默认是
-  attention_analysis/outputs/libero_rollouts/videos。
+  attention_analysis/outputs/videos。
 
 --skip_existing / --no-skip-existing
   默认会跳过已有视频的任务。如果你想复跑同一任务并重新请求 attention server，
@@ -89,6 +104,7 @@ python attention_analysis/attention_rollouts.py \
   --host localhost \
   --port 8000 \
   --max_trials 1 \
+  --topk_max_chunks 3 \
   --no-skip-existing
 ```
 
@@ -98,20 +114,21 @@ python attention_analysis/attention_rollouts.py \
 
 ```text
 /home/jinjaguo/BH_MOE/attention_analysis/outputs/attention_trace/
-  <task_name>/
-    trial_<trial_id>/
-      chunk_<chunk_id>/
-        baseline/
-          token_map.json
-          config.json
-          attention_summary.parquet
-          attention_topk.jsonl
-          hidden_state_norms.parquet
-          sink_tokens.json
-          action_outputs.npz
+  <experiment_name>/
+    <task_name>/
+      trial_<trial_id>/
+        chunk_<chunk_id>/
+          baseline/
+            token_map.json
+            config.json
+            attention_summary.parquet
+            attention_topk.jsonl
+            hidden_state_norms.parquet
+            sink_tokens.json
+            action_outputs.npz
 ```
 
-`task_name/trial_id/chunk_id` 来自 `attention_rollouts.py` 的 websocket request，所以 attention server 仍然可以按 chunk 保存 attention trace。
+`experiment_name/task_name/trial_id/chunk_id` 来自 `attention_rollouts.py` 的 websocket request，所以 attention server 仍然可以按实验组、任务和 chunk 保存 attention trace。
 
 `attention_summary.parquet` 和 `attention_topk.jsonl` 里会记录 action denoise 阶段：
 
@@ -144,14 +161,18 @@ optional_full_attention/attention_phase=<phase>_step=<step>_layer=<layer>.npz
 独立 rollout 侧只保存视频，默认保存到：
 
 ```text
-/home/jinjaguo/BH_MOE/attention_analysis/outputs/libero_rollouts/
-  videos/
+/home/jinjaguo/BH_MOE/attention_analysis/outputs/videos/
+  <experiment_name>/
+    <task_name>/
+      trial_<trial_id>/
+        video_success.mp4 或 video_failure.mp4
+        wrist_success.mp4 或 wrist_failure.mp4
 ```
 
 如果你想显式指定，也可以加：
 
 ```bash
---output_root /home/jinjaguo/BH_MOE/attention_analysis/outputs/libero_rollouts/videos
+--output_root /home/jinjaguo/BH_MOE/attention_analysis/outputs/videos
 ```
 
 ## 跑重标定实验
@@ -214,7 +235,7 @@ attention_analysis/outputs/attention_trace_plots/
 
 1. `start_attention_server.py` 复用 `start_server_record.py` 的 OpenPI policy 创建逻辑。
 2. `AttentionTracingPolicy` 包装 PyTorch OpenPI policy，不改变 websocket client。
-3. `ood_libero_rollouts.py` 每个 chunk request 里的 `task_name/trial_id/chunk_id` 会决定 attention 输出目录。
+3. `attention_rollouts.py` 每个 chunk request 里的 `experiment_name/task_name/trial_id/chunk_id` 会决定 attention 输出目录。
 4. wrapper patch `transformers.models.gemma.modeling_gemma.eager_attention_forward`，因此保存的是实际用于 `attn @ V` 的 attention。
 5. `recalibrated` 模式会在 `attn @ V` 之前修改 attention，因此可以测试动作级因果效应。
 

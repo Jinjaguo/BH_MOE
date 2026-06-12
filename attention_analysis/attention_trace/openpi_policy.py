@@ -13,6 +13,8 @@ AttentionTracingPolicy(policy, record_root, mode, ...)
   save_full_attention: whether to save compressed full attention tensors.
   layers_to_save: optional layer ids for full attention dumps.
   topk: number of top attended keys saved per action query.
+  topk_max_chunks: optional request field limiting top-k recording to the first
+    N chunks of each trial.
   sink_strategy: value_projection detects sink keys from value-state norms.
 
 Usage
@@ -29,7 +31,7 @@ result = policy.infer(obs)
 Outputs
 -------
 For each websocket action request, files are saved under:
-<record_root>/<task_name>/trial_<trial_id>/chunk_<chunk_id>/<mode>/
+<record_root>/<experiment_name>/<task_name>/trial_<trial_id>/chunk_<chunk_id>/<mode>/
 
 The run directory contains token_map.json, config.json,
 attention_summary.parquet, attention_topk.jsonl, hidden_state_norms.parquet,
@@ -75,6 +77,12 @@ def _sanitize_name(value: str | None, fallback: str) -> str:
     raw = (value or fallback).strip()
     safe = raw.replace("/", "_").replace("\\", "_").replace(" ", "_")
     return safe or fallback
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    return int(value)
 
 
 def _infer_target_object(prompt: str | None) -> str | None:
@@ -611,9 +619,11 @@ class _OpenPIAttentionCollector:
         self._prefix_info = _PrefixInfo()
         self._run_context = {
             "prompt": str(obs.get("prompt") or ""),
+            "experiment_name": _sanitize_name(obs.get("experiment_name"), "default_experiment"),
             "task_name": _sanitize_name(obs.get("task_name"), "default_task"),
             "trial_id": str(obs.get("trial_id")),
             "chunk_id": int(obs.get("chunk_id")),
+            "topk_max_chunks": _optional_int(obs.get("topk_max_chunks")),
             "run_dir": run_dir,
         }
 
@@ -623,12 +633,15 @@ class _OpenPIAttentionCollector:
         token_map, token_spans = self._build_token_map()
         query_indices = list(range(int(self._pi_model.config.action_horizon)))
         target_object = _infer_target_object(self._run_context.get("prompt"))
+        topk_max_chunks = self._run_context.get("topk_max_chunks")
+        save_topk = topk_max_chunks is None or int(self._run_context["chunk_id"]) < int(topk_max_chunks)
         self._tracer = AttentionTracer(
             token_map,
             token_spans,
             self._run_context["run_dir"],
             save_full=self._save_full_attention,
             topk=self._topk,
+            save_topk=save_topk,
             layers_to_save=self._layers_to_save,
             target_object=target_object,
             distractor_objects=[],
@@ -643,9 +656,12 @@ class _OpenPIAttentionCollector:
         config = json.loads(config_path.read_text(encoding="utf-8"))
         config.update(
             {
+                "experiment_name": self._run_context["experiment_name"],
                 "task_name": self._run_context["task_name"],
                 "trial_id": self._run_context["trial_id"],
                 "chunk_id": self._run_context["chunk_id"],
+                "topk_max_chunks": topk_max_chunks,
+                "save_topk": save_topk,
                 "query_layout": {
                     "action_denoise": "query_position is local action token order; query_token_index maps to full token order",
                 },
@@ -835,10 +851,18 @@ class AttentionTracingPolicy:
 
     def infer(self, obs: dict[str, Any], *, noise: np.ndarray | None = None) -> dict[str, Any]:
         self._validate_request_ids(obs)
+        experiment_name = _sanitize_name(obs.get("experiment_name"), "default_experiment")
         task_name = _sanitize_name(obs.get("task_name"), self._default_task_name)
         trial_id = str(obs.get("trial_id"))
         chunk_id = int(obs.get("chunk_id"))
-        run_dir = self._record_root / task_name / f"trial_{trial_id}" / f"chunk_{chunk_id:05d}" / self._mode
+        run_dir = (
+            self._record_root
+            / experiment_name
+            / task_name
+            / f"trial_{trial_id}"
+            / f"chunk_{chunk_id:05d}"
+            / self._mode
+        )
 
         self._collector.start(obs, run_dir)
         try:

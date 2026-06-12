@@ -6,16 +6,17 @@ videos only.
 
 This is an attention-analysis copy of the repository-level
 `ood_libero_rollouts.py`. It keeps the same LIBERO action-inference behavior,
-but its default outputs live under `attention_analysis/outputs/libero_rollouts`
+but its default outputs live under `attention_analysis/outputs/videos`
 so attention experiments do not overwrite earlier OOD_exp rollout results.
 This version intentionally does not write rollout-side chunk_wise metadata. It
-still sends `task_name`, `trial_id`, and `chunk_id` in each websocket request so
-the attention-tracing server can save its own chunk-aligned attention files.
+still sends `experiment_name`, `task_name`, `trial_id`, and `chunk_id` in each
+websocket request so the attention-tracing server can save its own
+chunk-aligned attention files.
 
 For each BDDL task, it:
 1. Repeatedly rolls out the task.
-2. Sends explicit `task_name`, `trial_id`, and `chunk_id` with every websocket
-   request.
+2. Sends explicit `experiment_name`, `task_name`, `trial_id`, and `chunk_id`
+   with every websocket request.
 3. Saves rollout videos.
 4. Stops after a small diagnostic number of trials by default. Attention
    tracing is intended to inspect action-token attention, not to collect large
@@ -31,6 +32,12 @@ Arguments
   Path to the LIBERO checkout.
 `--max_trials`
   Maximum number of trials to run per task. Defaults to 1.
+`--experiment_name`
+  Optional experiment group name. Defaults to the tasks_info parent directory
+  name, or the input directory name when tasks_info is omitted.
+`--topk_max_chunks`
+  Optional number of leading chunks whose attention_topk.jsonl should be saved.
+  Other attention trace files are still saved for every chunk.
 `--host/--port`
   OpenPI websocket server address.
 `--output_root`
@@ -49,7 +56,7 @@ python /home/jinjaguo/BH_MOE/attention_analysis/attention_rollouts.py \
 Outputs
 -------
 Videos are saved under:
-`attention_analysis/outputs/libero_rollouts/videos/<suite_name>/<relative_task_dir>/<task_name>/`
+`attention_analysis/outputs/videos/<experiment_name>/<task_name>/trial_<trial_id>/`
 """
 
 import argparse
@@ -70,13 +77,17 @@ from robosuite.utils.errors import RandomizationError
 
 LIBERO_DUMMY_ACTION = [0.0] * 6 + [-1.0]
 DEFAULT_LIBERO_ROOT = pathlib.Path.home() / "LIBERO"
-DEFAULT_ATTENTION_ROLLOUT_ROOT = pathlib.Path(__file__).resolve().parent / "outputs" / "libero_rollouts"
-DEFAULT_OUTPUT_ROOT = DEFAULT_ATTENTION_ROLLOUT_ROOT / "videos"
+DEFAULT_OUTPUT_ROOT = pathlib.Path(__file__).resolve().parent / "outputs" / "videos"
 
 
 def sanitize_task_name(task_name: str) -> str:
     safe = str(task_name).strip().replace("/", "_").replace("\\", "_").replace(" ", "_")
     return safe or "default_task"
+
+
+def sanitize_experiment_name(experiment_name: str) -> str:
+    safe = str(experiment_name).strip().replace("/", "_").replace("\\", "_").replace(" ", "_")
+    return safe or "default_experiment"
 
 
 def quat2axisangle(quat: np.ndarray) -> np.ndarray:
@@ -203,6 +214,7 @@ def run_single_trial(
     *,
     env,
     prompt_text: str,
+    experiment_name: str,
     task_name: str,
     trial_id: int,
     policy: WebsocketClientPolicy,
@@ -211,6 +223,7 @@ def run_single_trial(
     max_steps: int,
     replan_steps: int,
     save_wrist: bool,
+    topk_max_chunks: Optional[int],
 ):
     print(f"  [trial {trial_id}] calling env.reset()", flush=True)
     obs = env.reset()
@@ -249,9 +262,11 @@ def run_single_trial(
                 "observation/wrist_image": wrist_img,
                 "observation/state": state,
                 "prompt": str(prompt_text),
+                "experiment_name": experiment_name,
                 "task_name": task_name,
                 "trial_id": int(trial_id),
                 "chunk_id": int(chunk_id),
+                "topk_max_chunks": None if topk_max_chunks is None else int(topk_max_chunks),
             }
             received = policy.infer(base_payload)
             action_chunk = np.asarray(received["actions"], dtype=np.float32)
@@ -279,6 +294,7 @@ def collect_task_trials(
     *,
     bddl_path: pathlib.Path,
     prompt_text: str,
+    experiment_name: str,
     task_name: str,
     output_dir: pathlib.Path,
     policy: WebsocketClientPolicy,
@@ -292,6 +308,7 @@ def collect_task_trials(
     seed: int,
     placement_retries: int,
     save_wrist: bool,
+    topk_max_chunks: Optional[int],
 ) -> Tuple[int, int, int]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -318,6 +335,7 @@ def collect_task_trials(
             done, t, frames, wrist_frames = run_single_trial(
                 env=env,
                 prompt_text=prompt_text,
+                experiment_name=experiment_name,
                 task_name=task_name,
                 trial_id=trial_id,
                 policy=policy,
@@ -326,18 +344,21 @@ def collect_task_trials(
                 max_steps=max_steps,
                 replan_steps=replan_steps,
                 save_wrist=save_wrist,
+                topk_max_chunks=topk_max_chunks,
             )
         finally:
             print(f"  [trial {trial_id}] closing env", flush=True)
             env.close()
 
         suffix = "success" if done else "failure"
-        video_path = output_dir / f"trial{trial_id}_{suffix}.mp4"
+        trial_dir = output_dir / f"trial_{trial_id}"
+        trial_dir.mkdir(parents=True, exist_ok=True)
+        video_path = trial_dir / f"video_{suffix}.mp4"
         print(f"  [trial {trial_id}] writing video to {video_path}", flush=True)
         imageio.mimwrite(str(video_path), [np.asarray(x) for x in frames], fps=30)
 
         if save_wrist:
-            wrist_path = output_dir / f"trial{trial_id}_{suffix}_wrist.mp4"
+            wrist_path = trial_dir / f"wrist_{suffix}.mp4"
             imageio.mimwrite(str(wrist_path), [np.asarray(x) for x in wrist_frames], fps=30)
 
         trials_run += 1
@@ -378,7 +399,9 @@ def iter_bddl_files_from_tasks_info(tasks_info: pathlib.Path, input_dir: pathlib
             rel_variants.append(pathlib.Path(*parts[2:]))
 
         for variant in rel_variants:
+            candidates.append((tasks_info.parent / variant).resolve())
             candidates.append((input_dir / variant).resolve())
+            candidates.append((tasks_info.parent / variant.name).resolve())
             candidates.append((input_dir / variant.name).resolve())
 
         for candidate in candidates:
@@ -426,9 +449,22 @@ def resolve_tasks_info_path(tasks_info: Optional[pathlib.Path], input_dir: pathl
     )
 
 
+def infer_experiment_name(
+    *,
+    explicit_name: Optional[str],
+    tasks_info: Optional[pathlib.Path],
+    input_dir: pathlib.Path,
+) -> str:
+    if explicit_name:
+        return sanitize_experiment_name(explicit_name)
+    if tasks_info is not None:
+        return sanitize_experiment_name(tasks_info.parent.name)
+    return sanitize_experiment_name(input_dir.name)
+
+
 def task_has_existing_results(*, output_dir: pathlib.Path) -> bool:
     if output_dir.exists():
-        if any(output_dir.glob("trial*_success.mp4")) or any(output_dir.glob("trial*_failure.mp4")):
+        if any(output_dir.glob("trial_*/*.mp4")):
             return True
 
     return False
@@ -449,7 +485,19 @@ def main():
     parser.add_argument("--wait_steps", type=int, default=10)
     parser.add_argument("--max_steps", type=int, default=300)
     parser.add_argument("--replan_steps", type=int, default=5)
-    parser.add_argument("--max_trials", type=int, default=5)
+    parser.add_argument("--max_trials", type=int, default=1)
+    parser.add_argument(
+        "--topk_max_chunks",
+        type=int,
+        default=None,
+        help="Only save attention_topk.jsonl for the first N chunks of each trial. Other trace files are unchanged.",
+    )
+    parser.add_argument(
+        "--experiment_name",
+        type=str,
+        default=None,
+        help="Experiment group name used in output paths. Defaults to tasks_info parent directory name.",
+    )
     parser.add_argument(
         "--placement_retries",
         type=int,
@@ -472,6 +520,8 @@ def main():
     )
     parser.add_argument("--save_wrist", action="store_true")
     args = parser.parse_args()
+    if args.topk_max_chunks is not None and args.topk_max_chunks < 0:
+        raise ValueError("--topk_max_chunks must be non-negative")
 
     input_dir = args.input_dir.expanduser().resolve()
     print(f"input dir path: {input_dir}")
@@ -491,11 +541,16 @@ def main():
     if not bddl_files:
         raise FileNotFoundError(f"No .bddl files found under: {input_dir}")
 
-    suite_name = input_dir.name
-    print(f"Suit name: {suite_name}")
+    experiment_name = infer_experiment_name(
+        explicit_name=args.experiment_name,
+        tasks_info=tasks_info,
+        input_dir=input_dir,
+    )
+    output_root = args.output_root.expanduser().resolve()
+    print(f"Experiment name: {experiment_name}")
     print(f"LIBERO source: {args.libero_root.expanduser().resolve()}")
     print(f"Input dir: {input_dir}")
-    print(f"Detected suite root: {suite_name}")
+    print(f"Video output root: {output_root}")
     print(f"Found {len(bddl_files)} BDDL files")
 
     for bddl_path in bddl_files:
@@ -504,8 +559,7 @@ def main():
 
         prompt_text = read_prompt_for_bddl(bddl_path)
         task_name = sanitize_task_name(bddl_path.stem)
-        rel_parent = bddl_path.parent.relative_to(input_dir)
-        output_dir = args.output_root / suite_name / rel_parent / task_name
+        output_dir = output_root / experiment_name / task_name
         print(f"Output path: {output_dir}")
 
         if args.skip_existing and task_has_existing_results(output_dir=output_dir):
@@ -515,6 +569,7 @@ def main():
         successes, failures, trials_run = collect_task_trials(
             bddl_path=bddl_path,
             prompt_text=prompt_text,
+            experiment_name=experiment_name,
             task_name=task_name,
             output_dir=output_dir,
             policy=policy,
@@ -528,6 +583,7 @@ def main():
             seed=args.seed,
             placement_retries=args.placement_retries,
             save_wrist=args.save_wrist,
+            topk_max_chunks=args.topk_max_chunks,
         )
         print(
             f"Finished task {task_name}: success={successes}, "

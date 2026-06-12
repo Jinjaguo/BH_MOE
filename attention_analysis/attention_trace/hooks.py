@@ -12,6 +12,7 @@ output_dir: run directory receiving token maps, summaries, top-k records, and
             optional compressed attention tensors.
 save_full: whether to save full attention tensors as compressed npz files.
 topk: number of top attended keys to save for each selected query.
+save_topk: whether to write attention_topk.jsonl for this run.
 
 Usage
 -----
@@ -85,6 +86,7 @@ class AttentionTracer:
         output_dir: str | pathlib.Path,
         save_full: bool = False,
         topk: int = 20,
+        save_topk: bool = True,
         layers_to_save: list[int] | None = None,
         heads_to_save: list[int] | str = "all",
         target_object: str | None = None,
@@ -96,6 +98,7 @@ class AttentionTracer:
         self.output_dir = pathlib.Path(output_dir)
         self.save_full = save_full
         self.topk = topk
+        self.save_topk = save_topk
         self.layers_to_save = None if layers_to_save is None else set(int(v) for v in layers_to_save)
         self.heads_to_save = heads_to_save
         self.target_object = target_object
@@ -116,7 +119,8 @@ class AttentionTracer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         if self.save_full:
             (self.output_dir / "optional_full_attention").mkdir(exist_ok=True)
-        (self.output_dir / "attention_topk.jsonl").write_text("", encoding="utf-8")
+        if self.save_topk:
+            (self.output_dir / "attention_topk.jsonl").write_text("", encoding="utf-8")
         (self.output_dir / "token_map.json").write_text(
             json.dumps(
                 {
@@ -136,6 +140,7 @@ class AttentionTracer:
                     "seed": seed,
                     "mode": mode,
                     "save_full": self.save_full,
+                    "save_topk": self.save_topk,
                     "topk": self.topk,
                     "target_object": self.target_object,
                     "distractor_objects": self.distractor_objects,
@@ -273,20 +278,21 @@ class AttentionTracer:
             )
         )
 
-        with (self.output_dir / "attention_topk.jsonl").open("a", encoding="utf-8") as handle:
-            for record in attention_topk(
-                attn,
-                self.token_map,
-                query_indices or self.query_indices,
-                denoise_step=denoise_step,
-                layer=layer_idx,
-                inference_phase=inference_phase,
-                query_token_map=query_token_map,
-                key_token_map=key_token_map,
-                query_type=query_group,
-                topk=self.topk,
-            ):
-                handle.write(json.dumps(record, ensure_ascii=True) + "\n")
+        if self.save_topk:
+            with (self.output_dir / "attention_topk.jsonl").open("a", encoding="utf-8") as handle:
+                for record in attention_topk(
+                    attn,
+                    self.token_map,
+                    query_indices or self.query_indices,
+                    denoise_step=denoise_step,
+                    layer=layer_idx,
+                    inference_phase=inference_phase,
+                    query_token_map=query_token_map,
+                    key_token_map=key_token_map,
+                    query_type=query_group,
+                    topk=self.topk,
+                ):
+                    handle.write(json.dumps(record, ensure_ascii=True) + "\n")
 
         if self.save_full and (self.layers_to_save is None or layer_idx in self.layers_to_save):
             self._save_full_attention(attn, denoise_step, layer_idx, inference_phase=inference_phase)
